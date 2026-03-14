@@ -369,13 +369,13 @@ button.secondary {
 
 .analytics-structure-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(2, minmax(460px, 1fr));
   gap: 12px;
 }
 
 .analytics-structure-grid .table-wrap table {
-  min-width: 100%;
-  table-layout: fixed;
+  min-width: 620px;
+  table-layout: auto;
 }
 
 .analytics-structure-grid th:first-child,
@@ -387,7 +387,9 @@ button.secondary {
 .analytics-structure-grid td:nth-child(2) {
   width: auto;
   white-space: normal;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 .analytics-structure-grid th:nth-child(3),
@@ -398,6 +400,12 @@ button.secondary {
 .analytics-structure-grid th:nth-child(4),
 .analytics-structure-grid td:nth-child(4) {
   width: 96px;
+}
+
+@media (max-width: 1420px) {
+  .analytics-structure-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .cell-rank {
@@ -801,7 +809,7 @@ tr.unresolved-row {
   }
 
   .analytics-structure-grid .table-wrap table {
-    min-width: 100%;
+    min-width: 560px;
   }
 
   .hero h1 {
