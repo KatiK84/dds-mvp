@@ -85,7 +85,6 @@ const els = {
   bankAccountForm: document.getElementById("bankAccountForm"),
   bankAccountNameInput: document.getElementById("bankAccountNameInput"),
   bankAccountEntitySelect: document.getElementById("bankAccountEntitySelect"),
-  resetBanksDataBtn: document.getElementById("resetBanksDataBtn"),
   banksEntitySummaryBody: document.getElementById("banksEntitySummaryBody"),
   banksEntityBlocks: document.getElementById("banksEntityBlocks"),
   banksGlobalSummaryBody: document.getElementById("banksGlobalSummaryBody"),
@@ -176,7 +175,6 @@ function bindReportEvents() {
 function bindBankEvents() {
   els.legalEntityForm.addEventListener("submit", onAddLegalEntity);
   els.bankAccountForm.addEventListener("submit", onAddBankAccount);
-  els.resetBanksDataBtn.addEventListener("click", resetBanksData);
 
   els.banksEntityBlocks.addEventListener("change", (event) => {
     const input = event.target.closest("input[data-bank-upload='1']");
@@ -188,18 +186,23 @@ function bindBankEvents() {
 
     uploadBankStatement(accountId, file);
   });
-}
 
-function resetBanksData() {
-  const confirmed = window.confirm("Сбросить все юрлица, счета и загруженные банковские выписки?");
-  if (!confirmed) return;
+  els.banksEntityBlocks.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-bank-action]");
+    if (!button) return;
 
-  state.banks = {
-    legalEntities: [],
-    accounts: [],
-  };
+    const accountId = Number(button.dataset.accountId);
+    const action = button.dataset.bankAction;
 
-  persistBanksAndRender();
+    if (action === "delete") {
+      deleteBankAccountSafely(accountId);
+      return;
+    }
+
+    if (action === "restore") {
+      restoreBankAccount(accountId);
+    }
+  });
 }
 
 function onAddLegalEntity(event) {
@@ -240,6 +243,7 @@ function onAddBankAccount(event) {
     id: getNextId(state.banks.accounts),
     legalEntityId,
     name,
+    status: "ACTIVE",
     fileName: "",
     transactions: [],
     summary: null,
@@ -281,6 +285,45 @@ function uploadBankStatement(accountId, file) {
   reader.readAsText(file, "utf-8");
 }
 
+function deleteBankAccountSafely(accountId) {
+  const account = state.banks.accounts.find((item) => item.id === accountId);
+  if (!account || account.status === "DELETED") return;
+
+  const stepOne = window.confirm(
+    `Удалить банк "${account.name}" из активных? Он пропадет из расчетов, но его можно восстановить.`
+  );
+  if (!stepOne) return;
+
+  const phrase = window.prompt(`Для подтверждения введите УДАЛИТЬ`);
+  if (String(phrase || "").trim().toUpperCase() !== "УДАЛИТЬ") {
+    alert("Удаление отменено: фраза подтверждения не совпала.");
+    return;
+  }
+
+  const stepThree = window.confirm(`Последнее подтверждение: точно удалить "${account.name}"?`);
+  if (!stepThree) return;
+
+  state.banks.accounts = state.banks.accounts.map((item) =>
+    item.id === accountId ? { ...item, status: "DELETED" } : item
+  );
+
+  persistBanksAndRender();
+}
+
+function restoreBankAccount(accountId) {
+  const account = state.banks.accounts.find((item) => item.id === accountId);
+  if (!account || account.status !== "DELETED") return;
+
+  const confirmed = window.confirm(`Восстановить банк "${account.name}" в активные?`);
+  if (!confirmed) return;
+
+  state.banks.accounts = state.banks.accounts.map((item) =>
+    item.id === accountId ? { ...item, status: "ACTIVE" } : item
+  );
+
+  persistBanksAndRender();
+}
+
 function parseBankStatementCsv(text) {
   const cleanText = text.replace(/^\uFEFF/, "").trim();
   if (!cleanText) throw new Error("CSV выписки пустой.");
@@ -291,24 +334,60 @@ function parseBankStatementCsv(text) {
 
   if (rows.length < 2) throw new Error("В выписке нет данных.");
 
-  const headers = rows[0].map((header) => normalizeText(header));
-  const idxDate = findColumn(headers, ["дата", "date", "booking"]);
-  const idxAmount = findColumn(headers, ["сумма", "amount", "betrag", "umsatz"]);
-  const idxDebit = findColumn(headers, ["списан", "debit", "расход", "выбыт"]);
-  const idxCredit = findColumn(headers, ["зачисл", "credit", "приход", "поступ"]);
-  const idxBalance = findColumn(headers, ["баланс", "остаток", "balance", "saldo"]);
+  const dateCandidates = [
+    "дата",
+    "date",
+    "booking",
+    "buchungstag",
+    "buchungsdatum",
+    "wertstellung",
+    "valuta",
+  ];
+  const amountCandidates = ["сумма", "amount", "betrag", "umsatz", "betrag (eur)"];
+  const debitCandidates = ["списан", "debit", "расход", "выбыт", "soll", "lastschrift"];
+  const creditCandidates = ["зачисл", "credit", "приход", "поступ", "haben", "gutschrift"];
+  const balanceCandidates = ["баланс", "остаток", "balance", "saldo", "kontostand"];
 
-  if (idxDate === -1) throw new Error("Не найдена колонка даты.");
-  if (idxAmount === -1 && idxDebit === -1 && idxCredit === -1) {
-    throw new Error("Не найдена колонка суммы/дебет/кредит.");
+  let headerRowIndex = -1;
+  let idxDate = -1;
+  let idxAmount = -1;
+  let idxDebit = -1;
+  let idxCredit = -1;
+  let idxBalance = -1;
+
+  for (let i = 0; i < Math.min(rows.length, 25); i += 1) {
+    const headers = rows[i].map((header) => normalizeText(header));
+    const dateIdx = findColumn(headers, dateCandidates);
+    const amountIdx = findColumn(headers, amountCandidates);
+    const debitIdx = findColumn(headers, debitCandidates);
+    const creditIdx = findColumn(headers, creditCandidates);
+    const balanceIdx = findColumn(headers, balanceCandidates);
+
+    if (dateIdx !== -1 && (amountIdx !== -1 || debitIdx !== -1 || creditIdx !== -1)) {
+      headerRowIndex = i;
+      idxDate = dateIdx;
+      idxAmount = amountIdx;
+      idxDebit = debitIdx;
+      idxCredit = creditIdx;
+      idxBalance = balanceIdx;
+      break;
+    }
   }
 
-  return rows
-    .slice(1)
+  if (headerRowIndex === -1 || idxDate === -1) {
+    throw new Error("Не найдена колонка даты (например: Buchungstag/Wertstellung/Дата).");
+  }
+
+  if (idxAmount === -1 && idxDebit === -1 && idxCredit === -1) {
+    throw new Error("Не найдена колонка суммы (например: Betrag/Umsatz/Soll-Haben).");
+  }
+
+  const parsedRows = rows
+    .slice(headerRowIndex + 1)
     .map((cells, index) => {
       const dateRaw = String(cells[idxDate] || "").trim();
       const dateObj = parseFlexibleDate(dateRaw);
-      if (!dateObj) throw new Error(`Неверная дата в строке ${index + 2}: ${dateRaw}`);
+      if (!dateObj) return null;
 
       let amount = null;
       if (idxAmount >= 0) {
@@ -322,22 +401,29 @@ function parseBankStatementCsv(text) {
       }
 
       if (amount === null || !Number.isFinite(amount)) {
-        throw new Error(`Неверная сумма в строке ${index + 2}.`);
+        return null;
       }
 
       const balance = idxBalance >= 0 ? parseAmount(String(cells[idxBalance] || "")) : null;
 
       return {
-        idx: index,
+        idx: index + headerRowIndex + 1,
         dateObj,
         amount,
         balance: Number.isFinite(balance) ? balance : null,
       };
     })
+    .filter(Boolean)
     .sort((a, b) => {
       const byDate = a.dateObj.getTime() - b.dateObj.getTime();
       return byDate !== 0 ? byDate : a.idx - b.idx;
     });
+
+  if (parsedRows.length === 0) {
+    throw new Error("Не удалось прочитать строки выписки: проверьте формат CSV и названия колонок.");
+  }
+
+  return parsedRows;
 }
 
 function summarizeBankTransactions(transactions) {
@@ -387,10 +473,12 @@ function renderBanksTab() {
 
   const entitySummaries = state.banks.legalEntities.map((entity) => {
     const accounts = state.banks.accounts.filter((account) => account.legalEntityId === entity.id);
+    const activeAccounts = accounts.filter((account) => account.status !== "DELETED");
     return {
       entity,
       accounts,
-      summary: summarizeEntity(accounts),
+      activeAccounts,
+      summary: summarizeEntity(activeAccounts),
     };
   });
 
@@ -407,6 +495,7 @@ function renderBanksEntityBlocks(entitySummaries) {
           ? `<div class="empty">Пока нет добавленных счетов.</div>`
           : accounts
               .map((account) => {
+                const isDeleted = account.status === "DELETED";
                 const status = account.summary
                   ? `Файл: ${escapeHtml(account.fileName)}. Последняя дата: ${formatDate(account.summary.latestDate)}`
                   : "Выписка не загружена.";
@@ -415,9 +504,19 @@ function renderBanksEntityBlocks(entitySummaries) {
                 <article class="bank-account-card">
                   <div class="bank-account-head">
                     <div class="bank-account-name">${escapeHtml(account.name)}</div>
+                    <div class="bank-account-meta">
+                      <span class="badge ${isDeleted ? "DELETE" : "ACTIVE"}">${isDeleted ? "Удален" : "Активен"}</span>
+                      <div class="bank-account-actions">
+                        ${
+                          isDeleted
+                            ? `<button type="button" class="secondary" data-bank-action="restore" data-account-id="${account.id}">Восстановить</button>`
+                            : `<button type="button" class="secondary" data-bank-action="delete" data-account-id="${account.id}">Удалить</button>`
+                        }
+                      </div>
+                    </div>
                   </div>
                   <div class="bank-upload">
-                    <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" />
+                    <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" ${isDeleted ? "disabled" : ""} />
                     <span class="bank-status">${status}</span>
                   </div>
                 </article>`;
@@ -502,7 +601,7 @@ function renderBanksEntitySummaryTable(entitySummaries) {
 
 function renderBanksGlobalSummary(entitySummaries) {
   const globalSummary = summarizeEntity(
-    entitySummaries.flatMap(({ accounts }) => accounts)
+    entitySummaries.flatMap(({ activeAccounts }) => activeAccounts)
   );
 
   if (!globalSummary) {
@@ -1510,6 +1609,7 @@ function normalizeBankAccount(account, idx) {
     id: Number(account?.id) || idx + 1,
     legalEntityId: Number(account?.legalEntityId) || 0,
     name: String(account?.name || "").trim(),
+    status: account?.status === "DELETED" ? "DELETED" : "ACTIVE",
     fileName: String(account?.fileName || ""),
     transactions,
     summary: summary && summary.latestDate ? summary : transactions.length > 0 ? summarizeBankTransactions(transactions) : null,
@@ -1637,6 +1737,12 @@ function parseAmount(raw) {
   let cleaned = String(raw || "").trim().replace(/\s/g, "").replace(/[^\d,.-]/g, "");
   if (!cleaned) return null;
 
+  // Supports trailing minus: "1.234,56-"
+  const isTrailingMinus = cleaned.endsWith("-");
+  if (isTrailingMinus) {
+    cleaned = `-${cleaned.slice(0, -1)}`;
+  }
+
   if (cleaned.includes(",") && cleaned.includes(".")) {
     if (cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".")) {
       cleaned = cleaned.replace(/\./g, "").replace(",", ".");
@@ -1685,6 +1791,10 @@ function parseFlexibleDate(raw) {
     day = Number(parts[0]);
     month = Number(parts[1]);
     year = Number(parts[2]);
+  }
+
+  if (year < 100) {
+    year += 2000;
   }
 
   const date = new Date(year, month - 1, day);

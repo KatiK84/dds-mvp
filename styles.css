@@ -320,6 +320,24 @@ tr.unresolved-row {
   font-weight: 600;
 }
 
+.bank-account-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bank-account-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.bank-account-actions button {
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+
 .bank-upload {
   display: flex;
   align-items: center;
