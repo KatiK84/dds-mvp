@@ -197,6 +197,71 @@ button.secondary {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.analytics-settings-card {
+  background: linear-gradient(180deg, #f9fbf9 0%, #ffffff 100%);
+}
+
+.analytics-settings-form {
+  display: grid;
+  gap: 10px;
+}
+
+.analytics-settings-group {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: #fff;
+}
+
+.analytics-settings-group h3 {
+  margin: 0 0 10px;
+  font-size: 0.94rem;
+}
+
+.analytics-settings-group .controls-grid {
+  align-items: end;
+}
+
+.analytics-settings-group label {
+  font-size: 0.85rem;
+}
+
+.analytics-advanced {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfdfb;
+}
+
+.analytics-advanced summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.analytics-advanced-body {
+  border-top: 1px solid var(--line);
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.analytics-actions-bar {
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.analytics-actions-main,
+.analytics-actions-extra {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .analytics-findings-layout {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
@@ -649,6 +714,17 @@ tr.unresolved-row {
   .plan-import-grid,
   .analytics-findings-layout {
     grid-template-columns: 1fr;
+  }
+
+  .analytics-actions-bar,
+  .analytics-actions-main,
+  .analytics-actions-extra {
+    width: 100%;
+  }
+
+  .analytics-actions-main button,
+  .analytics-actions-extra button {
+    flex: 1 1 auto;
   }
 
   .hero h1 {
