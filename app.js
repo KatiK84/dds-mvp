@@ -294,6 +294,8 @@ const els = {
   obligationId: document.getElementById("obligationId"),
   obligationName: document.getElementById("obligationName"),
   obligationCategory: document.getElementById("obligationCategory"),
+  obligationLegalEntity: document.getElementById("obligationLegalEntity"),
+  obligationBankAccount: document.getElementById("obligationBankAccount"),
   obligationCounterparty: document.getElementById("obligationCounterparty"),
   obligationAmount: document.getElementById("obligationAmount"),
   obligationDay: document.getElementById("obligationDay"),
@@ -743,6 +745,9 @@ function bindPlanEvents() {
 function bindObligationsEvents() {
   els.obligationForm?.addEventListener("submit", onObligationFormSubmit);
   els.obligationCancelBtn?.addEventListener("click", cancelObligationEdit);
+  els.obligationLegalEntity?.addEventListener("change", () => {
+    refreshObligationAccountSelect(Number(els.obligationLegalEntity?.value) || 0, 0);
+  });
   els.obligationHorizonDays?.addEventListener("change", () => {
     if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут менять настройки календаря.")) return;
     state.obligations.settings.horizonDays = normalizeIntInRange(els.obligationHorizonDays.value, 30, 7, 90);
@@ -1074,6 +1079,9 @@ function renderObligationsTab() {
   if (!els.obligationTableBody || !els.obligationCalendarBody) return;
 
   const canManage = hasPermission("plan.manage");
+  const preferredEntityId = Number(els.obligationLegalEntity?.value) || 0;
+  const selectedEntityId = refreshObligationEntitySelect(preferredEntityId);
+  refreshObligationAccountSelect(selectedEntityId, Number(els.obligationBankAccount?.value) || 0);
   fillObligationSettingsInputs();
   renderObligationFormState();
   renderObligationTable(canManage);
@@ -1137,6 +1145,10 @@ function buildObligationFromForm() {
   if (!name) throw new Error("Введите название обязательного платежа.");
 
   const category = normalizeObligationCategory(els.obligationCategory?.value || "other");
+  const legalEntityId = Number(els.obligationLegalEntity?.value) || 0;
+  if (!legalEntityId) throw new Error("Выберите юрлицо.");
+  const bankAccountId = Number(els.obligationBankAccount?.value) || 0;
+  if (!bankAccountId) throw new Error("Выберите банковский счет.");
   const amount = parseAmount(String(els.obligationAmount?.value || ""));
   if (!Number.isFinite(amount) || amount <= 0) throw new Error("Сумма должна быть больше 0.");
 
@@ -1149,6 +1161,8 @@ function buildObligationFromForm() {
   return {
     name,
     category,
+    legalEntityId,
+    bankAccountId,
     counterparty: String(els.obligationCounterparty?.value || "").trim(),
     amount: Math.abs(amount),
     dayOfMonth,
@@ -1164,6 +1178,8 @@ function clearObligationForm() {
   if (els.obligationId) els.obligationId.value = "";
   if (els.obligationName) els.obligationName.value = "";
   if (els.obligationCategory) els.obligationCategory.value = "tax";
+  const selectedEntityId = refreshObligationEntitySelect(0);
+  refreshObligationAccountSelect(selectedEntityId, 0);
   if (els.obligationCounterparty) els.obligationCounterparty.value = "";
   if (els.obligationAmount) els.obligationAmount.value = "";
   if (els.obligationDay) els.obligationDay.value = "10";
@@ -1186,6 +1202,8 @@ function startObligationEdit(id) {
   if (els.obligationId) els.obligationId.value = String(id);
   if (els.obligationName) els.obligationName.value = item.name || "";
   if (els.obligationCategory) els.obligationCategory.value = normalizeObligationCategory(item.category);
+  const selectedEntityId = refreshObligationEntitySelect(Number(item.legalEntityId) || 0);
+  refreshObligationAccountSelect(selectedEntityId, Number(item.bankAccountId) || 0);
   if (els.obligationCounterparty) els.obligationCounterparty.value = item.counterparty || "";
   if (els.obligationAmount) els.obligationAmount.value = formatNumberForInput(item.amount);
   if (els.obligationDay) els.obligationDay.value = String(normalizeIntInRange(item.dayOfMonth, 10, 1, 31));
@@ -1237,7 +1255,7 @@ function renderObligationFormState() {
 function renderObligationTable(canManage) {
   const rows = sortObligations(state.obligations.items || []);
   if (!rows.length) {
-    els.obligationTableBody.innerHTML = `<tr><td colspan="10" class="empty">Обязательные платежи еще не добавлены.</td></tr>`;
+    els.obligationTableBody.innerHTML = `<tr><td colspan="12" class="empty">Обязательные платежи еще не добавлены.</td></tr>`;
     return;
   }
 
@@ -1247,6 +1265,8 @@ function renderObligationTable(canManage) {
       <tr>
         <td>${escapeHtml(row.name)}</td>
         <td><span class="obligation-badge ${escapeHtml(row.category)}">${escapeHtml(obligationCategoryLabel(row.category))}</span></td>
+        <td>${escapeHtml(getLegalEntityNameById(row.legalEntityId))}</td>
+        <td>${escapeHtml(getBankAccountNameById(row.bankAccountId))}</td>
         <td>${escapeHtml(row.counterparty || "—")}</td>
         <td>${formatMoney(row.amount)}</td>
         <td>${row.dayOfMonth}</td>
@@ -1304,6 +1324,8 @@ function buildObligationScheduleRows(items, horizonDays, startDate = new Date())
             month: monthKey,
             name: item.name,
             category: item.category,
+            legalEntityName: getLegalEntityNameById(item.legalEntityId),
+            bankAccountName: getBankAccountNameById(item.bankAccountId),
             counterparty: item.counterparty,
             amount: item.amount,
           });
@@ -1331,7 +1353,7 @@ function buildDueDateForMonth(monthKey, dayOfMonth) {
 
 function renderObligationCalendar(rows, horizonDays) {
   if (!rows.length) {
-    els.obligationCalendarBody.innerHTML = `<tr><td colspan="6" class="empty">На горизонте ${horizonDays} дней обязательных платежей нет.</td></tr>`;
+    els.obligationCalendarBody.innerHTML = `<tr><td colspan="8" class="empty">На горизонте ${horizonDays} дней обязательных платежей нет.</td></tr>`;
     renderObligationMetrics(rows, horizonDays);
     return;
   }
@@ -1344,6 +1366,8 @@ function renderObligationCalendar(rows, horizonDays) {
         <td>${escapeHtml(row.month)}</td>
         <td>${escapeHtml(row.name)}</td>
         <td><span class="obligation-badge ${escapeHtml(row.category)}">${escapeHtml(obligationCategoryLabel(row.category))}</span></td>
+        <td>${escapeHtml(row.legalEntityName || "—")}</td>
+        <td>${escapeHtml(row.bankAccountName || "—")}</td>
         <td>${escapeHtml(row.counterparty || "—")}</td>
         <td>${formatMoney(row.amount)}</td>
       </tr>
@@ -1517,10 +1541,18 @@ function renderObligationSuggestions(canManage) {
 function acceptObligationSuggestion(suggestId) {
   const suggestion = (state.obligationsUi.suggestions || []).find((row) => row.id === suggestId);
   if (!suggestion) return;
+  const legalEntityId = Number(els.obligationLegalEntity?.value) || 0;
+  const bankAccountId = Number(els.obligationBankAccount?.value) || 0;
+  if (!legalEntityId || !bankAccountId) {
+    alert("Сначала выберите юрлицо и банковский счет в форме обязательства.");
+    return;
+  }
   state.obligations.items.push({
     id: getNextId(state.obligations.items),
     name: suggestion.name,
     category: suggestion.category,
+    legalEntityId,
+    bankAccountId,
     counterparty: suggestion.counterparty || "",
     amount: suggestion.amount,
     dayOfMonth: suggestion.dayOfMonth,
@@ -4890,6 +4922,7 @@ function sumMaybeValues(values) {
 function persistBanksAndRender() {
   saveBanksState(state.banks);
   renderBanksTab();
+  renderObligationsTab();
 }
 
 function refreshBankEntitySelect() {
@@ -4911,6 +4944,63 @@ function refreshBankEntitySelect() {
   } else {
     els.bankAccountEntitySelect.selectedIndex = 0;
   }
+}
+
+function refreshObligationEntitySelect(preferredId = 0) {
+  if (!els.obligationLegalEntity) return 0;
+  const entities = state.banks.legalEntities || [];
+  if (!entities.length) {
+    els.obligationLegalEntity.innerHTML = `<option value="">Нет юрлиц</option>`;
+    els.obligationLegalEntity.value = "";
+    return 0;
+  }
+
+  const current = Number(preferredId) || Number(els.obligationLegalEntity.value) || Number(entities[0]?.id) || 0;
+  els.obligationLegalEntity.innerHTML = entities
+    .map((entity) => `<option value="${entity.id}">${escapeHtml(entity.name)}</option>`)
+    .join("");
+
+  const exists = entities.some((entity) => Number(entity.id) === current);
+  const next = exists ? current : Number(entities[0]?.id) || 0;
+  els.obligationLegalEntity.value = next > 0 ? String(next) : "";
+  return next;
+}
+
+function refreshObligationAccountSelect(legalEntityId = 0, preferredAccountId = 0) {
+  if (!els.obligationBankAccount) return 0;
+  const accounts = (state.banks.accounts || [])
+    .filter(
+      (account) =>
+        account.status !== "DELETED" &&
+        Number(account.legalEntityId) === Number(legalEntityId)
+    )
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ru"));
+
+  if (!accounts.length) {
+    els.obligationBankAccount.innerHTML = `<option value="">Нет счетов</option>`;
+    els.obligationBankAccount.value = "";
+    return 0;
+  }
+
+  els.obligationBankAccount.innerHTML = accounts
+    .map((account) => `<option value="${account.id}">${escapeHtml(account.name)}</option>`)
+    .join("");
+
+  const preferred = Number(preferredAccountId) || Number(els.obligationBankAccount.value) || Number(accounts[0]?.id) || 0;
+  const exists = accounts.some((account) => Number(account.id) === preferred);
+  const next = exists ? preferred : Number(accounts[0]?.id) || 0;
+  els.obligationBankAccount.value = next > 0 ? String(next) : "";
+  return next;
+}
+
+function getLegalEntityNameById(id) {
+  const entity = (state.banks.legalEntities || []).find((item) => Number(item.id) === Number(id));
+  return entity?.name || "—";
+}
+
+function getBankAccountNameById(id) {
+  const account = (state.banks.accounts || []).find((item) => Number(item.id) === Number(id));
+  return account?.name || "—";
 }
 
 function refreshBankFolderEntitySelect() {
@@ -6578,6 +6668,8 @@ function normalizeObligationsState(rawState, fallback) {
             id: Number(item?.id) || idx + 1,
             name: String(item?.name || "").trim() || `Обязательный платеж ${idx + 1}`,
             category: normalizeObligationCategory(item?.category),
+            legalEntityId: Number(item?.legalEntityId) || 0,
+            bankAccountId: Number(item?.bankAccountId) || 0,
             counterparty: String(item?.counterparty || "").trim(),
             amount: Math.abs(amount),
             dayOfMonth: normalizeIntInRange(item?.dayOfMonth, 10, 1, 31),
