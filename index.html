@@ -55,6 +55,7 @@
       <nav class="tabs" aria-label="Разделы приложения">
         <button class="tab-btn active" data-tab="report">Отчет ДДС</button>
         <button class="tab-btn" data-tab="plan">План/Прогноз</button>
+        <button class="tab-btn" data-tab="obligations">Календарь платежей</button>
         <button class="tab-btn" data-tab="analytics">Аналитика и выводы</button>
         <button class="tab-btn" data-tab="reconcile">Разнесение платежей</button>
         <button class="tab-btn" data-tab="banks">Банки</button>
@@ -342,6 +343,157 @@
                 </tr>
               </thead>
               <tbody id="planActivityTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="obligationsTab">
+        <section class="card">
+          <h2>1. Обязательные платежи (ручное ведение)</h2>
+          <p class="hint">
+            Добавляйте регулярные платежи вручную (налоги, ЗП, аренда, кредиты). Система построит календарь на ближайший горизонт.
+          </p>
+          <form id="obligationForm" class="controls-grid obligation-form-grid">
+            <input type="hidden" id="obligationId" />
+            <label>
+              Название
+              <input id="obligationName" type="text" placeholder="Например: Налог USt" required />
+            </label>
+            <label>
+              Категория
+              <select id="obligationCategory">
+                <option value="tax">Налоги</option>
+                <option value="salary">ЗП/ФОТ</option>
+                <option value="rent">Аренда</option>
+                <option value="credit">Кредиты/лизинг</option>
+                <option value="other">Прочее</option>
+              </select>
+            </label>
+            <label>
+              Контрагент
+              <input id="obligationCounterparty" type="text" placeholder="Finanzamt / арендодатель / банк" />
+            </label>
+            <label>
+              Сумма, €
+              <input id="obligationAmount" type="text" placeholder="например 12500,00" required />
+            </label>
+            <label>
+              День месяца
+              <input id="obligationDay" type="number" min="1" max="31" step="1" value="10" />
+            </label>
+            <label>
+              Начало действия
+              <input id="obligationStartMonth" type="month" />
+            </label>
+            <label>
+              Конец действия (опционально)
+              <input id="obligationEndMonth" type="month" />
+            </label>
+            <label>
+              Комментарий
+              <input id="obligationComment" type="text" placeholder="Доп.условия" />
+            </label>
+            <label class="inline-check">
+              <input id="obligationActive" type="checkbox" checked />
+              <span>Активный платеж</span>
+            </label>
+            <div class="form-actions obligation-actions">
+              <button id="obligationSaveBtn" type="submit">Сохранить обязательство</button>
+              <button id="obligationCancelBtn" type="button" class="secondary">Отменить редактирование</button>
+            </div>
+          </form>
+          <p id="obligationFormStatus" class="status">Режим: добавление.</p>
+        </section>
+
+        <section class="table-card">
+          <h2>2. Календарь на ближайшие дни</h2>
+          <div class="controls-grid obligation-horizon-grid">
+            <label>
+              Горизонт, дней
+              <select id="obligationHorizonDays">
+                <option value="7">7</option>
+                <option value="14">14</option>
+                <option value="30" selected>30</option>
+                <option value="60">60</option>
+                <option value="90">90</option>
+              </select>
+            </label>
+          </div>
+          <section class="metrics" id="obligationMetrics"></section>
+          <div class="table-wrap small">
+            <table>
+              <thead>
+                <tr>
+                  <th>Дата платежа</th>
+                  <th>Месяц</th>
+                  <th>Название</th>
+                  <th>Категория</th>
+                  <th>Контрагент</th>
+                  <th>Сумма</th>
+                </tr>
+              </thead>
+              <tbody id="obligationCalendarBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="table-card">
+          <h2>3. Реестр обязательств</h2>
+          <div class="table-wrap small">
+            <table>
+              <thead>
+                <tr>
+                  <th>Название</th>
+                  <th>Категория</th>
+                  <th>Контрагент</th>
+                  <th>Сумма</th>
+                  <th>День</th>
+                  <th>Начало</th>
+                  <th>Конец</th>
+                  <th>Статус</th>
+                  <th>Источник</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody id="obligationTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>4. Автоподсказки из истории ДДС</h2>
+          <p class="hint">Подсказки строятся по прошлым периодам (повторяющиеся выбытия) и требуют вашего подтверждения.</p>
+          <div class="controls-grid obligation-suggest-grid">
+            <label>
+              База анализа, месяцев
+              <input id="obligationLookbackMonths" type="number" min="2" max="24" step="1" value="6" />
+            </label>
+            <label>
+              Мин. повторов (месяцев)
+              <input id="obligationMinRepeats" type="number" min="2" max="12" step="1" value="2" />
+            </label>
+            <label>
+              Мин. сумма, €
+              <input id="obligationMinAmount" type="text" placeholder="например 300,00" value="300,00" />
+            </label>
+            <button id="obligationSuggestBtn" type="button" class="secondary">Предложить из истории</button>
+          </div>
+          <p id="obligationSuggestStatus" class="status">Нажмите «Предложить из истории» после загрузки операций ДДС.</p>
+          <div class="table-wrap small">
+            <table>
+              <thead>
+                <tr>
+                  <th>Платеж</th>
+                  <th>Категория</th>
+                  <th>Контрагент/статья</th>
+                  <th>Средняя сумма</th>
+                  <th>Рекоменд. день</th>
+                  <th>Повторы</th>
+                  <th>Действие</th>
+                </tr>
+              </thead>
+              <tbody id="obligationSuggestBody"></tbody>
             </table>
           </div>
         </section>

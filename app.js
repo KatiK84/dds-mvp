@@ -79,6 +79,7 @@ const STORAGE_CHANGE_LOG_KEY = "dds_mvp_change_log_v1";
 const STORAGE_PLAN_KEY = "dds_mvp_plan_v1";
 const STORAGE_ANALYTICS_KEY = "dds_mvp_analytics_v1";
 const STORAGE_RUNTIME_KEY = "dds_mvp_runtime_v1";
+const STORAGE_OBLIGATIONS_KEY = "dds_mvp_obligations_v1";
 const CHANGE_LOG_LIMIT = 3000;
 const ANALYTICS_PRIMARY_FINDINGS_LIMIT = 7;
 const UNKNOWN_ARTICLE = "Статья неизвестна";
@@ -148,6 +149,13 @@ const BANK_TEMPLATE_DELIMITERS = [
   { value: "tab", label: "TAB" },
 ];
 const runtimeState = loadRuntimeState();
+const OBLIGATION_CATEGORY_LABELS = {
+  tax: "Налоги",
+  salary: "ЗП/ФОТ",
+  rent: "Аренда",
+  credit: "Кредиты/лизинг",
+  other: "Прочее",
+};
 
 const state = {
   activeTab: "report",
@@ -155,6 +163,7 @@ const state = {
   banks: loadBanksState(),
   plan: loadPlanState(),
   analytics: loadAnalyticsState(),
+  obligations: loadObligationsState(),
   access: loadAccessState(),
   changeLog: loadChangeLog(),
   banksUi: {
@@ -171,6 +180,10 @@ const state = {
   },
   planUi: {
     editingIndex: -1,
+  },
+  obligationsUi: {
+    editingId: 0,
+    suggestions: [],
   },
   operationsRaw: runtimeState.operationsRaw,
   manualAssignments: runtimeState.manualAssignments,
@@ -194,6 +207,7 @@ const els = {
   accessRoleHint: document.getElementById("accessRoleHint"),
   reportTab: document.getElementById("reportTab"),
   planTab: document.getElementById("planTab"),
+  obligationsTab: document.getElementById("obligationsTab"),
   analyticsTab: document.getElementById("analyticsTab"),
   banksTab: document.getElementById("banksTab"),
   reconcileTab: document.getElementById("reconcileTab"),
@@ -276,6 +290,30 @@ const els = {
   planItemCancelBtn: document.getElementById("planItemCancelBtn"),
   planItemFormStatus: document.getElementById("planItemFormStatus"),
   planItemsTableBody: document.getElementById("planItemsTableBody"),
+  obligationForm: document.getElementById("obligationForm"),
+  obligationId: document.getElementById("obligationId"),
+  obligationName: document.getElementById("obligationName"),
+  obligationCategory: document.getElementById("obligationCategory"),
+  obligationCounterparty: document.getElementById("obligationCounterparty"),
+  obligationAmount: document.getElementById("obligationAmount"),
+  obligationDay: document.getElementById("obligationDay"),
+  obligationStartMonth: document.getElementById("obligationStartMonth"),
+  obligationEndMonth: document.getElementById("obligationEndMonth"),
+  obligationComment: document.getElementById("obligationComment"),
+  obligationActive: document.getElementById("obligationActive"),
+  obligationSaveBtn: document.getElementById("obligationSaveBtn"),
+  obligationCancelBtn: document.getElementById("obligationCancelBtn"),
+  obligationFormStatus: document.getElementById("obligationFormStatus"),
+  obligationHorizonDays: document.getElementById("obligationHorizonDays"),
+  obligationMetrics: document.getElementById("obligationMetrics"),
+  obligationCalendarBody: document.getElementById("obligationCalendarBody"),
+  obligationTableBody: document.getElementById("obligationTableBody"),
+  obligationLookbackMonths: document.getElementById("obligationLookbackMonths"),
+  obligationMinRepeats: document.getElementById("obligationMinRepeats"),
+  obligationMinAmount: document.getElementById("obligationMinAmount"),
+  obligationSuggestBtn: document.getElementById("obligationSuggestBtn"),
+  obligationSuggestStatus: document.getElementById("obligationSuggestStatus"),
+  obligationSuggestBody: document.getElementById("obligationSuggestBody"),
   analyticsSettingsForm: document.getElementById("analyticsSettingsForm"),
   analyticsDateFrom: document.getElementById("analyticsDateFrom"),
   analyticsDateTo: document.getElementById("analyticsDateTo"),
@@ -346,6 +384,7 @@ function init() {
   bindChangeLogEvents();
   bindReportEvents();
   bindPlanEvents();
+  bindObligationsEvents();
   bindAnalyticsEvents();
   bindBankEvents();
   bindReconcileEvents();
@@ -361,6 +400,7 @@ function init() {
   renderArticlesTable();
   renderReport();
   renderPlanTab();
+  renderObligationsTab();
   renderAnalyticsTab();
   renderReconcileTable();
   renderChangeLog();
@@ -388,6 +428,7 @@ function setActiveTab(tabName) {
 
   els.reportTab.classList.toggle("active", tabName === "report");
   els.planTab.classList.toggle("active", tabName === "plan");
+  els.obligationsTab.classList.toggle("active", tabName === "obligations");
   els.analyticsTab.classList.toggle("active", tabName === "analytics");
   els.banksTab.classList.toggle("active", tabName === "banks");
   els.reconcileTab.classList.toggle("active", tabName === "reconcile");
@@ -463,6 +504,7 @@ function setAccessRole(nextRole, nextUserRaw) {
     renderArticlesTable();
     renderReport();
     renderPlanTab();
+    renderObligationsTab();
     renderAnalyticsTab();
     renderReconcileTable();
   } else {
@@ -556,6 +598,13 @@ function applyRoleAccess() {
   setFormDisabled(els.planItemForm, !canManagePlan);
   setElementDisabled(els.planItemCancelBtn, !canManagePlan);
   setElementDisabled(els.downloadPlanCsvBtn, !canExportPlan);
+  setFormDisabled(els.obligationForm, !canManagePlan);
+  setElementDisabled(els.obligationCancelBtn, !canManagePlan);
+  setElementDisabled(els.obligationHorizonDays, !canManagePlan);
+  setElementDisabled(els.obligationLookbackMonths, !canManagePlan);
+  setElementDisabled(els.obligationMinRepeats, !canManagePlan);
+  setElementDisabled(els.obligationMinAmount, !canManagePlan);
+  setElementDisabled(els.obligationSuggestBtn, !canManagePlan);
   setFormDisabled(els.analyticsSettingsForm, !canManageAnalytics);
   setElementDisabled(els.analyticsApplyBtn, !canManageAnalytics);
   setElementDisabled(els.analyticsSyncWithReportBtn, !canManageAnalytics);
@@ -689,6 +738,50 @@ function bindPlanEvents() {
   els.planItemForm?.addEventListener("submit", onPlanItemFormSubmit);
   els.planItemCancelBtn?.addEventListener("click", cancelPlanItemEdit);
   els.planItemsTableBody?.addEventListener("click", onPlanItemTableClick);
+}
+
+function bindObligationsEvents() {
+  els.obligationForm?.addEventListener("submit", onObligationFormSubmit);
+  els.obligationCancelBtn?.addEventListener("click", cancelObligationEdit);
+  els.obligationHorizonDays?.addEventListener("change", () => {
+    if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут менять настройки календаря.")) return;
+    state.obligations.settings.horizonDays = normalizeIntInRange(els.obligationHorizonDays.value, 30, 7, 90);
+    saveObligationsState(state.obligations);
+    renderObligationsTab();
+  });
+  els.obligationSuggestBtn?.addEventListener("click", analyzeObligationSuggestions);
+
+  els.obligationTableBody?.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-obligation-action]");
+    if (!button) return;
+    const id = Number(button.dataset.obligationId);
+    if (!Number.isFinite(id)) return;
+    const action = String(button.dataset.obligationAction || "");
+
+    if (action === "edit") {
+      if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут менять календарь платежей.")) return;
+      startObligationEdit(id);
+      return;
+    }
+    if (action === "delete") {
+      if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут менять календарь платежей.")) return;
+      deleteObligation(id);
+      return;
+    }
+    if (action === "toggle-active") {
+      if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут менять календарь платежей.")) return;
+      toggleObligationActive(id);
+    }
+  });
+
+  els.obligationSuggestBody?.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-obligation-suggest-action='accept']");
+    if (!button) return;
+    if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут подтверждать подсказки.")) return;
+    const suggestId = Number(button.dataset.suggestId);
+    if (!Number.isFinite(suggestId)) return;
+    acceptObligationSuggestion(suggestId);
+  });
 }
 
 function onPlanItemFormSubmit(event) {
@@ -975,6 +1068,556 @@ function renderPlanTab() {
   renderPlanMetrics(forecast);
   renderPlanMonthTable(forecast.monthRows);
   renderPlanActivityTable(forecast.activityRows);
+}
+
+function renderObligationsTab() {
+  if (!els.obligationTableBody || !els.obligationCalendarBody) return;
+
+  const canManage = hasPermission("plan.manage");
+  fillObligationSettingsInputs();
+  renderObligationFormState();
+  renderObligationTable(canManage);
+  renderObligationSuggestions(canManage);
+
+  const horizonDays = normalizeIntInRange(state.obligations.settings.horizonDays, 30, 7, 90);
+  const scheduleRows = buildObligationScheduleRows(state.obligations.items, horizonDays, new Date());
+  renderObligationCalendar(scheduleRows, horizonDays);
+}
+
+function fillObligationSettingsInputs() {
+  if (els.obligationHorizonDays) {
+    els.obligationHorizonDays.value = String(normalizeIntInRange(state.obligations.settings.horizonDays, 30, 7, 90));
+  }
+  if (els.obligationLookbackMonths) {
+    els.obligationLookbackMonths.value = String(normalizeIntInRange(state.obligations.settings.lookbackMonths, 6, 2, 24));
+  }
+  if (els.obligationMinRepeats) {
+    els.obligationMinRepeats.value = String(normalizeIntInRange(state.obligations.settings.minRepeats, 2, 2, 12));
+  }
+  if (els.obligationMinAmount) {
+    els.obligationMinAmount.value = formatNumberForInput(Number(state.obligations.settings.minAmount) || 300);
+  }
+  if (!els.obligationStartMonth?.value) {
+    els.obligationStartMonth.value = getCurrentMonthKey();
+  }
+}
+
+function onObligationFormSubmit(event) {
+  event.preventDefault();
+  if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут менять календарь платежей.")) return;
+
+  try {
+    const payload = buildObligationFromForm();
+    const editId = Number(state.obligationsUi.editingId);
+    const isEditing = Number.isFinite(editId) && editId > 0;
+    if (isEditing) {
+      state.obligations.items = state.obligations.items.map((item) => (item.id === editId ? { ...item, ...payload } : item));
+      logChange("OBLIGATION_UPDATED", "Календарь платежей", `${payload.name}; ${formatMoney(payload.amount)}`);
+    } else {
+      state.obligations.items.push({
+        id: getNextId(state.obligations.items),
+        source: "manual",
+        createdAt: new Date().toISOString(),
+        ...payload,
+      });
+      logChange("OBLIGATION_ADDED", "Календарь платежей", `${payload.name}; ${formatMoney(payload.amount)}`);
+    }
+
+    state.obligations.items = sortObligations(state.obligations.items);
+    saveObligationsState(state.obligations);
+    clearObligationForm();
+    renderObligationsTab();
+  } catch (error) {
+    alert(error.message || "Не удалось сохранить обязательство.");
+  }
+}
+
+function buildObligationFromForm() {
+  const name = String(els.obligationName?.value || "").trim();
+  if (!name) throw new Error("Введите название обязательного платежа.");
+
+  const category = normalizeObligationCategory(els.obligationCategory?.value || "other");
+  const amount = parseAmount(String(els.obligationAmount?.value || ""));
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Сумма должна быть больше 0.");
+
+  const dayOfMonth = normalizeIntInRange(els.obligationDay?.value, 10, 1, 31);
+  const startMonth = normalizeMonthKey(els.obligationStartMonth?.value || "");
+  if (!startMonth) throw new Error("Укажите месяц начала действия.");
+  const endMonth = normalizeMonthKey(els.obligationEndMonth?.value || "");
+  if (endMonth && endMonth < startMonth) throw new Error("Месяц окончания не может быть раньше месяца начала.");
+
+  return {
+    name,
+    category,
+    counterparty: String(els.obligationCounterparty?.value || "").trim(),
+    amount: Math.abs(amount),
+    dayOfMonth,
+    startMonth,
+    endMonth,
+    active: Boolean(els.obligationActive?.checked),
+    comment: String(els.obligationComment?.value || "").trim(),
+  };
+}
+
+function clearObligationForm() {
+  state.obligationsUi.editingId = 0;
+  if (els.obligationId) els.obligationId.value = "";
+  if (els.obligationName) els.obligationName.value = "";
+  if (els.obligationCategory) els.obligationCategory.value = "tax";
+  if (els.obligationCounterparty) els.obligationCounterparty.value = "";
+  if (els.obligationAmount) els.obligationAmount.value = "";
+  if (els.obligationDay) els.obligationDay.value = "10";
+  if (els.obligationStartMonth) els.obligationStartMonth.value = getCurrentMonthKey();
+  if (els.obligationEndMonth) els.obligationEndMonth.value = "";
+  if (els.obligationComment) els.obligationComment.value = "";
+  if (els.obligationActive) els.obligationActive.checked = true;
+  renderObligationFormState();
+}
+
+function cancelObligationEdit() {
+  clearObligationForm();
+  renderObligationsTab();
+}
+
+function startObligationEdit(id) {
+  const item = state.obligations.items.find((row) => row.id === id);
+  if (!item) return;
+  state.obligationsUi.editingId = id;
+  if (els.obligationId) els.obligationId.value = String(id);
+  if (els.obligationName) els.obligationName.value = item.name || "";
+  if (els.obligationCategory) els.obligationCategory.value = normalizeObligationCategory(item.category);
+  if (els.obligationCounterparty) els.obligationCounterparty.value = item.counterparty || "";
+  if (els.obligationAmount) els.obligationAmount.value = formatNumberForInput(item.amount);
+  if (els.obligationDay) els.obligationDay.value = String(normalizeIntInRange(item.dayOfMonth, 10, 1, 31));
+  if (els.obligationStartMonth) els.obligationStartMonth.value = item.startMonth || getCurrentMonthKey();
+  if (els.obligationEndMonth) els.obligationEndMonth.value = item.endMonth || "";
+  if (els.obligationComment) els.obligationComment.value = item.comment || "";
+  if (els.obligationActive) els.obligationActive.checked = Boolean(item.active);
+  renderObligationFormState();
+}
+
+function deleteObligation(id) {
+  const item = state.obligations.items.find((row) => row.id === id);
+  if (!item) return;
+  const confirmed = window.confirm(`Удалить обязательство "${item.name}"?`);
+  if (!confirmed) return;
+  state.obligations.items = state.obligations.items.filter((row) => row.id !== id);
+  if (Number(state.obligationsUi.editingId) === id) {
+    clearObligationForm();
+  }
+  saveObligationsState(state.obligations);
+  logChange("OBLIGATION_DELETED", "Календарь платежей", item.name);
+  renderObligationsTab();
+}
+
+function toggleObligationActive(id) {
+  const item = state.obligations.items.find((row) => row.id === id);
+  if (!item) return;
+  state.obligations.items = state.obligations.items.map((row) =>
+    row.id === id ? { ...row, active: !row.active } : row
+  );
+  saveObligationsState(state.obligations);
+  logChange("OBLIGATION_STATUS_CHANGED", "Календарь платежей", `${item.name}: ${item.active ? "неактивен" : "активен"}`);
+  renderObligationsTab();
+}
+
+function renderObligationFormState() {
+  if (!els.obligationFormStatus || !els.obligationSaveBtn || !els.obligationCancelBtn) return;
+  const editId = Number(state.obligationsUi.editingId);
+  const item = state.obligations.items.find((row) => row.id === editId);
+  if (!item) {
+    els.obligationFormStatus.textContent = "Режим: добавление.";
+    els.obligationSaveBtn.textContent = "Сохранить обязательство";
+    return;
+  }
+  els.obligationFormStatus.textContent = `Режим: редактирование "${item.name}".`;
+  els.obligationSaveBtn.textContent = "Сохранить изменения";
+}
+
+function renderObligationTable(canManage) {
+  const rows = sortObligations(state.obligations.items || []);
+  if (!rows.length) {
+    els.obligationTableBody.innerHTML = `<tr><td colspan="10" class="empty">Обязательные платежи еще не добавлены.</td></tr>`;
+    return;
+  }
+
+  els.obligationTableBody.innerHTML = rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(row.name)}</td>
+        <td><span class="obligation-badge ${escapeHtml(row.category)}">${escapeHtml(obligationCategoryLabel(row.category))}</span></td>
+        <td>${escapeHtml(row.counterparty || "—")}</td>
+        <td>${formatMoney(row.amount)}</td>
+        <td>${row.dayOfMonth}</td>
+        <td>${escapeHtml(row.startMonth || "—")}</td>
+        <td>${escapeHtml(row.endMonth || "—")}</td>
+        <td>${row.active ? "Активен" : "Пауза"}</td>
+        <td>${row.source === "suggested" ? "Подсказка" : "Ручной"}</td>
+        <td>
+          ${
+            canManage
+              ? `
+            <button type="button" class="inline-link" data-obligation-action="edit" data-obligation-id="${row.id}">Редактировать</button>
+            <button type="button" class="inline-link" data-obligation-action="toggle-active" data-obligation-id="${row.id}">${
+              row.active ? "Пауза" : "Включить"
+            }</button>
+            <button type="button" class="inline-link danger" data-obligation-action="delete" data-obligation-id="${row.id}">Удалить</button>
+          `
+              : "—"
+          }
+        </td>
+      </tr>
+    `
+    )
+    .join("");
+}
+
+function buildObligationScheduleRows(items, horizonDays, startDate = new Date()) {
+  const from = startOfDay(startDate);
+  const to = endOfDay(addDays(from, Math.max(1, horizonDays)));
+  const rows = [];
+
+  (items || [])
+    .filter((item) => item.active)
+    .forEach((item) => {
+      const startMonth = normalizeMonthKey(item.startMonth) || toMonthKey(from);
+      const endMonth = normalizeMonthKey(item.endMonth);
+      let cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+      const endCursor = new Date(to.getFullYear(), to.getMonth(), 1);
+
+      while (cursor <= endCursor) {
+        const monthKey = toMonthKey(cursor);
+        if (monthKey < startMonth) {
+          cursor = addMonths(cursor, 1);
+          continue;
+        }
+        if (endMonth && monthKey > endMonth) {
+          break;
+        }
+
+        const dueDate = buildDueDateForMonth(monthKey, item.dayOfMonth);
+        if (dueDate && dueDate >= from && dueDate <= to) {
+          rows.push({
+            obligationId: item.id,
+            dateObj: dueDate,
+            month: monthKey,
+            name: item.name,
+            category: item.category,
+            counterparty: item.counterparty,
+            amount: item.amount,
+          });
+        }
+        cursor = addMonths(cursor, 1);
+      }
+    });
+
+  return rows.sort((a, b) => {
+    const byDate = a.dateObj.getTime() - b.dateObj.getTime();
+    if (byDate !== 0) return byDate;
+    return b.amount - a.amount;
+  });
+}
+
+function buildDueDateForMonth(monthKey, dayOfMonth) {
+  const normalizedMonth = normalizeMonthKey(monthKey);
+  if (!normalizedMonth) return null;
+  const baseDate = parseFlexibleDate(`${normalizedMonth}-01`);
+  if (!baseDate) return null;
+  const lastDay = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0).getDate();
+  const safeDay = Math.min(lastDay, Math.max(1, normalizeIntInRange(dayOfMonth, 10, 1, 31)));
+  return new Date(baseDate.getFullYear(), baseDate.getMonth(), safeDay);
+}
+
+function renderObligationCalendar(rows, horizonDays) {
+  if (!rows.length) {
+    els.obligationCalendarBody.innerHTML = `<tr><td colspan="6" class="empty">На горизонте ${horizonDays} дней обязательных платежей нет.</td></tr>`;
+    renderObligationMetrics(rows, horizonDays);
+    return;
+  }
+
+  els.obligationCalendarBody.innerHTML = rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(toDateInputValue(row.dateObj))}</td>
+        <td>${escapeHtml(row.month)}</td>
+        <td>${escapeHtml(row.name)}</td>
+        <td><span class="obligation-badge ${escapeHtml(row.category)}">${escapeHtml(obligationCategoryLabel(row.category))}</span></td>
+        <td>${escapeHtml(row.counterparty || "—")}</td>
+        <td>${formatMoney(row.amount)}</td>
+      </tr>
+    `
+    )
+    .join("");
+
+  renderObligationMetrics(rows, horizonDays);
+}
+
+function renderObligationMetrics(rows, horizonDays) {
+  if (!els.obligationMetrics) return;
+  const activeCount = (state.obligations.items || []).filter((row) => row.active).length;
+  const horizonTotal = rows.reduce((sum, row) => sum + row.amount, 0);
+  const monthKey = getCurrentMonthKey();
+  const thisMonthTotal = rows.filter((row) => row.month === monthKey).reduce((sum, row) => sum + row.amount, 0);
+  const nearestDate = rows[0]?.dateObj || null;
+  const metrics = [
+    { label: "Активных обязательств", value: String(activeCount) },
+    { label: `Сумма на ${horizonDays} дней`, value: formatMoney(horizonTotal) },
+    { label: "Сумма текущего месяца", value: formatMoney(thisMonthTotal) },
+    { label: "Ближайший платеж", value: nearestDate ? toDateInputValue(nearestDate) : "н/д" },
+  ];
+  els.obligationMetrics.innerHTML = metrics
+    .map(
+      (item) => `
+      <article class="metric">
+        <div class="label">${escapeHtml(item.label)}</div>
+        <div class="value">${escapeHtml(item.value)}</div>
+      </article>
+    `
+    )
+    .join("");
+}
+
+function analyzeObligationSuggestions() {
+  if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут строить подсказки календаря.")) return;
+  const lookbackMonths = normalizeIntInRange(els.obligationLookbackMonths?.value, 6, 2, 24);
+  const minRepeats = normalizeIntInRange(els.obligationMinRepeats?.value, 2, 2, 12);
+  const minAmount = Math.max(0, parseAmount(String(els.obligationMinAmount?.value || "")) || 0);
+
+  state.obligations.settings.lookbackMonths = lookbackMonths;
+  state.obligations.settings.minRepeats = minRepeats;
+  state.obligations.settings.minAmount = minAmount;
+  saveObligationsState(state.obligations);
+
+  const ops = getOperationsForReconcile();
+  if (!ops.length) {
+    state.obligationsUi.suggestions = [];
+    if (els.obligationSuggestStatus) {
+      els.obligationSuggestStatus.textContent = "Нет операций ДДС для анализа. Сначала загрузите CSV на вкладке отчета.";
+    }
+    renderObligationsTab();
+    return;
+  }
+
+  const suggestions = buildObligationSuggestionsFromHistory(ops, state.obligations.settings, state.obligations.items);
+  state.obligationsUi.suggestions = suggestions;
+  if (els.obligationSuggestStatus) {
+    els.obligationSuggestStatus.textContent =
+      suggestions.length > 0
+        ? `Найдено подсказок: ${suggestions.length}. Подтвердите нужные.`
+        : "Подсказки не найдены по текущим параметрам.";
+  }
+  renderObligationsTab();
+}
+
+function buildObligationSuggestionsFromHistory(operations, settings, existingItems = []) {
+  const lookbackMonths = normalizeIntInRange(settings.lookbackMonths, 6, 2, 24);
+  const minRepeats = normalizeIntInRange(settings.minRepeats, 2, 2, 12);
+  const minAmount = Number(settings.minAmount) || 0;
+  const latestDate = operations
+    .map((op) => op.dateObj)
+    .filter((date) => date instanceof Date && !Number.isNaN(date.getTime()))
+    .sort((a, b) => b.getTime() - a.getTime())[0];
+  if (!latestDate) return [];
+
+  const windowStart = startOfDay(addMonths(latestDate, -(lookbackMonths - 1)));
+  const grouped = new Map();
+
+  operations
+    .filter((op) => op.direction === "Выбытие" && op.dateObj >= windowStart)
+    .forEach((op) => {
+      const counterpartyKey = normalizeText(op.counterparty || "");
+      const articleKey = normalizeText(op.article || op.articleInput || "");
+      const baseKey = counterpartyKey || articleKey;
+      if (!baseKey) return;
+
+      const key = counterpartyKey ? `cp:${counterpartyKey}` : `ar:${articleKey}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          key,
+          counterparty: String(op.counterparty || "").trim(),
+          article: String(op.article || op.articleInput || "").trim(),
+          amounts: [],
+          dates: [],
+          monthSet: new Set(),
+          rawComments: [],
+        });
+      }
+
+      const bucket = grouped.get(key);
+      bucket.amounts.push(Math.abs(Number(op.amount) || 0));
+      bucket.dates.push(op.dateObj);
+      bucket.monthSet.add(toMonthKey(op.dateObj));
+      if (op.comment) bucket.rawComments.push(String(op.comment));
+    });
+
+  const suggestions = [];
+  grouped.forEach((bucket) => {
+    const repeats = bucket.monthSet.size;
+    if (repeats < minRepeats) return;
+    const avgAmount = bucket.amounts.reduce((sum, val) => sum + val, 0) / bucket.amounts.length;
+    if (!Number.isFinite(avgAmount) || avgAmount < minAmount) return;
+    const recommendedDay = detectModeDay(bucket.dates);
+    const textSource = `${bucket.counterparty} ${bucket.article} ${bucket.rawComments.join(" ")}`.trim();
+    const category = guessObligationCategory(textSource);
+    const name = buildObligationName(category, bucket.counterparty, bucket.article);
+
+    if (hasExistingObligationCandidate(existingItems, bucket.counterparty, bucket.article, recommendedDay)) return;
+
+    suggestions.push({
+      id: suggestions.length + 1,
+      name,
+      category,
+      counterparty: bucket.counterparty || bucket.article || "Без контрагента",
+      article: bucket.article,
+      amount: avgAmount,
+      dayOfMonth: recommendedDay,
+      repeats,
+      sampleCount: bucket.amounts.length,
+    });
+  });
+
+  return suggestions.sort((a, b) => {
+    if (b.repeats !== a.repeats) return b.repeats - a.repeats;
+    return b.amount - a.amount;
+  });
+}
+
+function renderObligationSuggestions(canManage) {
+  const suggestions = state.obligationsUi.suggestions || [];
+  if (!suggestions.length) {
+    els.obligationSuggestBody.innerHTML = `<tr><td colspan="7" class="empty">Подсказок пока нет.</td></tr>`;
+    return;
+  }
+
+  els.obligationSuggestBody.innerHTML = suggestions
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(row.name)}</td>
+        <td><span class="obligation-badge ${escapeHtml(row.category)}">${escapeHtml(obligationCategoryLabel(row.category))}</span></td>
+        <td>${escapeHtml(row.counterparty || row.article || "—")}</td>
+        <td>${formatMoney(row.amount)}</td>
+        <td>${row.dayOfMonth}</td>
+        <td>${row.repeats} мес. (${row.sampleCount} оп.)</td>
+        <td>
+          ${
+            canManage
+              ? `<button type="button" class="secondary" data-obligation-suggest-action="accept" data-suggest-id="${row.id}">Добавить</button>`
+              : "—"
+          }
+        </td>
+      </tr>
+    `
+    )
+    .join("");
+}
+
+function acceptObligationSuggestion(suggestId) {
+  const suggestion = (state.obligationsUi.suggestions || []).find((row) => row.id === suggestId);
+  if (!suggestion) return;
+  state.obligations.items.push({
+    id: getNextId(state.obligations.items),
+    name: suggestion.name,
+    category: suggestion.category,
+    counterparty: suggestion.counterparty || "",
+    amount: suggestion.amount,
+    dayOfMonth: suggestion.dayOfMonth,
+    startMonth: getCurrentMonthKey(),
+    endMonth: "",
+    active: true,
+    comment: "Добавлено из автоподсказки по истории",
+    source: "suggested",
+    createdAt: new Date().toISOString(),
+  });
+  state.obligations.items = sortObligations(state.obligations.items);
+  state.obligationsUi.suggestions = state.obligationsUi.suggestions.filter((row) => row.id !== suggestId);
+  saveObligationsState(state.obligations);
+  logChange("OBLIGATION_ACCEPTED", "Календарь платежей", `${suggestion.name}; ${formatMoney(suggestion.amount)}`);
+  renderObligationsTab();
+}
+
+function detectModeDay(dates) {
+  const counts = new Map();
+  (dates || []).forEach((dateObj) => {
+    const day = Number(dateObj?.getDate?.() || 0);
+    if (!day) return;
+    counts.set(day, (counts.get(day) || 0) + 1);
+  });
+  if (!counts.size) return 10;
+  return [...counts.entries()].sort((a, b) => (b[1] !== a[1] ? b[1] - a[1] : a[0] - b[0]))[0][0];
+}
+
+function buildObligationName(category, counterparty, article) {
+  const party = String(counterparty || "").trim();
+  const art = String(article || "").trim();
+  if (party) return party;
+  if (art) return `${obligationCategoryLabel(category)}: ${art}`;
+  return `${obligationCategoryLabel(category)} (регулярный платеж)`;
+}
+
+function hasExistingObligationCandidate(items, counterparty, article, dayOfMonth) {
+  const cpKey = normalizeText(counterparty || "");
+  const articleKey = normalizeText(article || "");
+  return (items || []).some((item) => {
+    const itemCp = normalizeText(item.counterparty || "");
+    const itemName = normalizeText(item.name || "");
+    const dayDiff = Math.abs((Number(item.dayOfMonth) || 0) - (Number(dayOfMonth) || 0));
+    const sameEntity = (cpKey && (itemCp === cpKey || itemName.includes(cpKey))) || (articleKey && itemName.includes(articleKey));
+    return sameEntity && dayDiff <= 2;
+  });
+}
+
+function guessObligationCategory(text) {
+  const source = normalizeText(text || "");
+  if (!source) return "other";
+  if (
+    source.includes("finanzamt") ||
+    source.includes("steuer") ||
+    source.includes("tax") ||
+    source.includes("ust") ||
+    source.includes("vat")
+  ) {
+    return "tax";
+  }
+  if (
+    source.includes("lohn") ||
+    source.includes("salary") ||
+    source.includes("gehalt") ||
+    source.includes("fot") ||
+    source.includes("payroll")
+  ) {
+    return "salary";
+  }
+  if (source.includes("miete") || source.includes("rent") || source.includes("арен")) {
+    return "rent";
+  }
+  if (source.includes("kredit") || source.includes("loan") || source.includes("leasing") || source.includes("лизинг")) {
+    return "credit";
+  }
+  return "other";
+}
+
+function obligationCategoryLabel(category) {
+  return OBLIGATION_CATEGORY_LABELS[normalizeObligationCategory(category)] || OBLIGATION_CATEGORY_LABELS.other;
+}
+
+function normalizeObligationCategory(value) {
+  const normalized = String(value || "other").trim().toLowerCase();
+  return OBLIGATION_CATEGORY_LABELS[normalized] ? normalized : "other";
+}
+
+function sortObligations(items) {
+  return [...(items || [])].sort((a, b) => {
+    const byActive = Number(Boolean(b.active)) - Number(Boolean(a.active));
+    if (byActive !== 0) return byActive;
+    const byStart = String(a.startMonth || "").localeCompare(String(b.startMonth || ""));
+    if (byStart !== 0) return byStart;
+    const byDay = (Number(a.dayOfMonth) || 0) - (Number(b.dayOfMonth) || 0);
+    if (byDay !== 0) return byDay;
+    return String(a.name || "").localeCompare(String(b.name || ""), "ru");
+  });
 }
 
 function renderPlanItemEditor() {
@@ -4537,6 +5180,7 @@ function renderReport() {
   renderShortDdsTable(totalsByActivity, grandTotals, reportRows.length);
   renderReportTable(reportRows, totalsByActivity, grandTotals);
   renderMonthTable(monthRows);
+  renderObligationsTab();
   renderAnalyticsTab();
   renderReconcileTable();
   persistRuntimeState();
@@ -5528,6 +6172,7 @@ function exportAppBackupFile() {
       articles: state.articles,
       banks: state.banks,
       plan: state.plan,
+      obligations: state.obligations,
       analytics: { ...state.analytics, latest: null },
       access: state.access,
       changeLog: state.changeLog,
@@ -5595,6 +6240,7 @@ function applyBackupPayload(data) {
       : fallbackArticles;
   state.banks = normalizeBanksState(data.banks, fallbackBanks);
   state.plan = normalizePlanState(data.plan, createDefaultPlanState());
+  state.obligations = normalizeObligationsState(data.obligations, createDefaultObligationsState());
   state.analytics = normalizeAnalyticsState(data.analytics, createDefaultAnalyticsState());
   state.access = normalizeAccessStatePayload(data.access);
   state.changeLog = normalizeChangeLogPayload(data.changeLog);
@@ -5615,6 +6261,7 @@ function applyBackupPayload(data) {
   saveArticles(state.articles);
   saveBanksState(state.banks);
   savePlanState(state.plan);
+  saveObligationsState(state.obligations);
   saveAnalyticsState(state.analytics);
   saveAccessState(state.access);
   saveChangeLog(state.changeLog);
@@ -5639,6 +6286,7 @@ function applyBackupPayload(data) {
   renderArticlesTable();
   renderReport();
   renderPlanTab();
+  renderObligationsTab();
   renderAnalyticsTab();
   renderReconcileTable();
   renderChangeLog();
@@ -5880,6 +6528,81 @@ function createDefaultPlanState() {
       openings: "",
       assumptions: "",
     },
+  };
+}
+
+function createDefaultObligationsState() {
+  return {
+    items: [],
+    settings: {
+      lookbackMonths: 6,
+      minRepeats: 2,
+      minAmount: 300,
+      horizonDays: 30,
+    },
+  };
+}
+
+function loadObligationsState() {
+  const fallback = createDefaultObligationsState();
+  try {
+    const raw = localStorage.getItem(STORAGE_OBLIGATIONS_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return normalizeObligationsState(parsed, fallback);
+  } catch (error) {
+    console.warn("Cannot load obligations state from localStorage", error);
+    return fallback;
+  }
+}
+
+function saveObligationsState(obligationsState) {
+  try {
+    localStorage.setItem(STORAGE_OBLIGATIONS_KEY, JSON.stringify(obligationsState));
+  } catch (error) {
+    console.warn("Cannot save obligations state to localStorage", error);
+  }
+}
+
+function normalizeObligationsState(rawState, fallback) {
+  if (!rawState || typeof rawState !== "object") return fallback;
+  const items = Array.isArray(rawState.items)
+    ? rawState.items
+        .map((item, idx) => {
+          const amount = toMaybeNumber(item?.amount);
+          if (!Number.isFinite(amount) || amount <= 0) return null;
+          const startMonth = normalizeMonthKey(item?.startMonth);
+          const endMonth = normalizeMonthKey(item?.endMonth);
+          if (!startMonth) return null;
+          return {
+            id: Number(item?.id) || idx + 1,
+            name: String(item?.name || "").trim() || `Обязательный платеж ${idx + 1}`,
+            category: normalizeObligationCategory(item?.category),
+            counterparty: String(item?.counterparty || "").trim(),
+            amount: Math.abs(amount),
+            dayOfMonth: normalizeIntInRange(item?.dayOfMonth, 10, 1, 31),
+            startMonth,
+            endMonth: endMonth && endMonth >= startMonth ? endMonth : "",
+            active: item?.active === undefined ? true : Boolean(item.active),
+            comment: String(item?.comment || "").trim(),
+            source: String(item?.source || "manual") === "suggested" ? "suggested" : "manual",
+            createdAt: String(item?.createdAt || ""),
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  const rawSettings = rawState.settings && typeof rawState.settings === "object" ? rawState.settings : {};
+  const settings = {
+    lookbackMonths: normalizeIntInRange(rawSettings.lookbackMonths, fallback.settings.lookbackMonths, 2, 24),
+    minRepeats: normalizeIntInRange(rawSettings.minRepeats, fallback.settings.minRepeats, 2, 12),
+    minAmount: Math.max(0, Number(rawSettings.minAmount) || fallback.settings.minAmount),
+    horizonDays: normalizeIntInRange(rawSettings.horizonDays, fallback.settings.horizonDays, 7, 90),
+  };
+
+  return {
+    items: sortObligations(items),
+    settings,
   };
 }
 

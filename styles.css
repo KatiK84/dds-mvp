@@ -226,6 +226,47 @@ button.secondary {
   margin-bottom: 8px;
 }
 
+.obligation-form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.obligation-actions {
+  margin-top: 0;
+}
+
+.obligation-horizon-grid,
+.obligation-suggest-grid {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.obligation-badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+  display: inline-block;
+}
+
+.obligation-badge.tax {
+  background: #fff4de;
+}
+
+.obligation-badge.salary {
+  background: #eaf2ff;
+}
+
+.obligation-badge.rent {
+  background: #eef8ee;
+}
+
+.obligation-badge.credit {
+  background: #f2ebff;
+}
+
+.obligation-badge.other {
+  background: #f1f2f1;
+}
+
 .plan-item-actions {
   margin-top: 0;
 }
