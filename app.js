@@ -291,7 +291,7 @@ function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "au
 
   reader.onload = () => {
     try {
-      const transactions = parseBankStatementCsv(String(reader.result || ""), parserProfile);
+      const transactions = parseBankStatementCsv(String(reader.result || ""), parserProfile, { selectedMonth });
       const monthTransactions = transactions
         .filter((tx) => {
           const primaryMonth = toMonthKey(tx.dateObj);
@@ -513,13 +513,13 @@ function getBankStatementProfile(profileRaw) {
   return base;
 }
 
-function parseBankStatementCsv(text, parserProfile = "auto") {
+function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
   const cleanText = text.replace(/^\uFEFF/, "").trim();
   if (!cleanText) throw new Error("CSV выписки пустой.");
 
-  const firstLine = cleanText.split("\n")[0] || "";
-  const delimiter = (firstLine.match(/;/g) || []).length >= (firstLine.match(/,/g) || []).length ? ";" : ",";
+  const delimiter = detectCsvDelimiter(cleanText);
   const rows = parseCsv(cleanText, delimiter);
+  const monthHint = getMonthHintFromSelectedMonth(options.selectedMonth);
 
   if (rows.length < 2) throw new Error("В выписке нет данных.");
 
@@ -580,12 +580,12 @@ function parseBankStatementCsv(text, parserProfile = "auto") {
 
       const primaryDateRaw = String(cells[idxDate] || "").trim();
       const altDateRaw = idxAltDate >= 0 ? String(cells[idxAltDate] || "").trim() : "";
-      const primaryDateObj = parseFlexibleDate(primaryDateRaw);
-      const altDateObj = altDateRaw ? parseFlexibleDate(altDateRaw) : null;
+      const primaryDateObj = parseFlexibleDateWithYearHint(primaryDateRaw, monthHint);
+      const altDateObj = altDateRaw ? parseFlexibleDateWithYearHint(altDateRaw, monthHint) : null;
 
       let dateObj = primaryDateObj || altDateObj;
       if (!dateObj) {
-        dateObj = findDateInCells(cells);
+        dateObj = findDateInCells(cells, monthHint);
       }
       if (!dateObj) return null;
 
@@ -2117,6 +2117,42 @@ function findArticle(input, articleMap) {
   return null;
 }
 
+function detectCsvDelimiter(text) {
+  const sample = String(text || "")
+    .split(/\r?\n/)
+    .slice(0, 30);
+
+  const delimiters = [";", ",", "\t"];
+  const scores = delimiters.reduce((acc, delimiter) => ({ ...acc, [delimiter]: 0 }), {});
+
+  sample.forEach((line) => {
+    delimiters.forEach((delimiter) => {
+      const count = (line.match(new RegExp(delimiter === "\t" ? "\\t" : `\\${delimiter}`, "g")) || []).length;
+      scores[delimiter] += count;
+    });
+  });
+
+  let best = ";";
+  let bestScore = -1;
+  delimiters.forEach((delimiter) => {
+    if (scores[delimiter] > bestScore) {
+      best = delimiter;
+      bestScore = scores[delimiter];
+    }
+  });
+
+  return bestScore > 0 ? best : ";";
+}
+
+function getMonthHintFromSelectedMonth(selectedMonth) {
+  const raw = String(selectedMonth || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(raw)) return null;
+  const year = Number(raw.slice(0, 4));
+  const month = Number(raw.slice(5, 7));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
+  return { year, month };
+}
+
 function parseCsv(text, delimiter) {
   const rows = [];
   let currentCell = "";
@@ -2308,12 +2344,43 @@ function parseFlexibleDate(raw) {
   return date;
 }
 
-function findDateInCells(cells) {
+function parseFlexibleDateWithYearHint(raw, monthHint) {
+  const parsed = parseFlexibleDate(raw);
+  if (parsed) return parsed;
+
+  if (!monthHint || !Number.isFinite(monthHint.year) || !Number.isFinite(monthHint.month)) return null;
+  const clean = String(raw || "").trim();
+  const shortDate = clean.match(/^(\d{1,2})[./-](\d{1,2})[./-]?$/);
+  if (!shortDate) return null;
+
+  const day = Number(shortDate[1]);
+  const month = Number(shortDate[2]);
+  let year = Number(monthHint.year);
+  if (monthHint.month === 1 && month === 12) {
+    year -= 1;
+  } else if (monthHint.month === 12 && month === 1) {
+    year += 1;
+  }
+  const date = new Date(year, month - 1, day);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function findDateInCells(cells, monthHint = null) {
   for (const cell of cells) {
     const value = String(cell || "").trim();
     if (!value) continue;
 
-    const date = parseFlexibleDate(value);
+    const date = parseFlexibleDateWithYearHint(value, monthHint);
     if (date) return date;
   }
 
