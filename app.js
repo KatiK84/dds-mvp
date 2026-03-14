@@ -4079,10 +4079,15 @@ function summarizeBankTransactionsByMonth(transactions, manualOpeningBalances = 
 
     if (Number.isFinite(current.openingBalance)) {
       const calculatedEnd = current.openingBalance + current.net;
-      // Keep end balance from statement when it exists.
-      // Use calculated fallback only if statement balance is missing.
+
+      // Consistency rule:
+      // if statement month-end conflicts with opening+net,
+      // prefer formula result to keep monthly chain stable.
       if (!Number.isFinite(current.endBalance)) {
         current.endBalance = calculatedEnd;
+      } else {
+        const diff = Math.abs(current.endBalance - calculatedEnd);
+        current.endBalance = diff <= 0.05 ? current.endBalance : calculatedEnd;
       }
     }
   }
