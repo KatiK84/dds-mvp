@@ -338,8 +338,8 @@
           <h2>1. Параметры аналитики</h2>
           <form id="analyticsSettingsForm" class="analytics-settings-form">
             <div class="analytics-settings-group">
-              <h3>Период и режим</h3>
-              <div class="controls-grid analytics-settings-grid">
+              <h3>1.1 Период и режим</h3>
+              <div class="controls-grid analytics-settings-grid analytics-main-grid">
                 <label>
                   Период с
                   <input id="analyticsDateFrom" type="date" />
@@ -381,7 +381,7 @@
                     <option value="conservative">Консервативный</option>
                   </select>
                 </label>
-                <label>
+                <label class="analytics-field-wide">
                   Начальный остаток периода, €
                   <input id="analyticsOpeningBalance" type="text" placeholder="например 50000,00" />
                 </label>
@@ -389,8 +389,8 @@
             </div>
 
             <div class="analytics-settings-group">
-              <h3>Ликвидность и риск</h3>
-              <div class="controls-grid analytics-settings-grid">
+              <h3>1.2 Ликвидность и риск</h3>
+              <div class="controls-grid analytics-settings-grid analytics-risk-grid">
                 <label>
                   Режим безопасного остатка
                   <select id="analyticsSafeBalanceMode">
@@ -414,10 +414,10 @@
             </div>
 
             <details class="analytics-advanced">
-              <summary>Расширенные настройки</summary>
+              <summary>1.3 Расширенные настройки</summary>
               <div class="analytics-advanced-body">
                 <div class="analytics-settings-group">
-                  <h3>Пороги предупреждений</h3>
+                  <h3>1.3.1 Пороги предупреждений</h3>
                   <div class="controls-grid analytics-settings-grid">
                     <label>
                       Порог top-1 источника, %
@@ -443,7 +443,7 @@
                 </div>
 
                 <div class="analytics-settings-group">
-                  <h3>Сценарные коэффициенты</h3>
+                  <h3>1.3.2 Сценарные коэффициенты</h3>
                   <div class="controls-grid analytics-settings-grid">
                     <label>
                       Оптимистичный: поступления +%
@@ -510,8 +510,8 @@
                     <tr>
                       <th>№</th>
                       <th>Статья</th>
-                      <th>Сумма</th>
-                      <th>Доля</th>
+                      <th>Сумма, €</th>
+                      <th>Доля, %</th>
                     </tr>
                   </thead>
                   <tbody id="analyticsInflowTopArticlesBody"></tbody>
@@ -526,8 +526,8 @@
                     <tr>
                       <th>№</th>
                       <th>Статья</th>
-                      <th>Сумма</th>
-                      <th>Доля</th>
+                      <th>Сумма, €</th>
+                      <th>Доля, %</th>
                     </tr>
                   </thead>
                   <tbody id="analyticsOutflowTopArticlesBody"></tbody>
@@ -542,8 +542,8 @@
                     <tr>
                       <th>№</th>
                       <th>Контрагент</th>
-                      <th>Сумма</th>
-                      <th>Доля</th>
+                      <th>Сумма, €</th>
+                      <th>Доля, %</th>
                     </tr>
                   </thead>
                   <tbody id="analyticsInflowTopCounterpartiesBody"></tbody>
@@ -558,8 +558,8 @@
                     <tr>
                       <th>№</th>
                       <th>Контрагент</th>
-                      <th>Сумма</th>
-                      <th>Доля</th>
+                      <th>Сумма, €</th>
+                      <th>Доля, %</th>
                     </tr>
                   </thead>
                   <tbody id="analyticsOutflowTopCounterpartiesBody"></tbody>

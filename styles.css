@@ -197,6 +197,22 @@ button.secondary {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.analytics-main-grid {
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
+}
+
+.analytics-main-grid > label:nth-child(3) {
+  grid-column: span 2;
+}
+
+.analytics-main-grid > .analytics-field-wide {
+  grid-column: span 2;
+}
+
+.analytics-risk-grid {
+  grid-template-columns: repeat(4, minmax(210px, 1fr));
+}
+
 .analytics-settings-card {
   background: linear-gradient(180deg, #f9fbf9 0%, #ffffff 100%);
 }
@@ -260,6 +276,21 @@ button.secondary {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+@media (max-width: 1500px) {
+  .analytics-main-grid {
+    grid-template-columns: repeat(3, minmax(220px, 1fr));
+  }
+
+  .analytics-main-grid > label:nth-child(3),
+  .analytics-main-grid > .analytics-field-wide {
+    grid-column: auto;
+  }
+
+  .analytics-risk-grid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
 }
 
 .analytics-findings-layout {
@@ -343,12 +374,30 @@ button.secondary {
 }
 
 .analytics-structure-grid .table-wrap table {
-  min-width: 520px;
+  min-width: 100%;
+  table-layout: fixed;
 }
 
 .analytics-structure-grid th:first-child,
 .analytics-structure-grid td:first-child {
   width: 52px;
+}
+
+.analytics-structure-grid th:nth-child(2),
+.analytics-structure-grid td:nth-child(2) {
+  width: auto;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.analytics-structure-grid th:nth-child(3),
+.analytics-structure-grid td:nth-child(3) {
+  width: 140px;
+}
+
+.analytics-structure-grid th:nth-child(4),
+.analytics-structure-grid td:nth-child(4) {
+  width: 96px;
 }
 
 .cell-rank {
@@ -746,8 +795,13 @@ tr.unresolved-row {
     flex: 1 1 auto;
   }
 
+  .analytics-main-grid,
+  .analytics-risk-grid {
+    grid-template-columns: 1fr;
+  }
+
   .analytics-structure-grid .table-wrap table {
-    min-width: 460px;
+    min-width: 100%;
   }
 
   .hero h1 {
