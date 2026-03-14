@@ -517,51 +517,42 @@ function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
   const cleanText = text.replace(/^\uFEFF/, "").trim();
   if (!cleanText) throw new Error("CSV выписки пустой.");
 
-  const delimiter = detectCsvDelimiter(cleanText);
-  const rows = parseCsv(cleanText, delimiter);
+  const profile = getBankStatementProfile(parserProfile);
+  const csvCandidate = parseCsvWithBestDelimiter(cleanText, profile);
+  const rows = csvCandidate.rows;
   const monthHint = getMonthHintFromSelectedMonth(options.selectedMonth);
 
   if (rows.length < 2) throw new Error("В выписке нет данных.");
 
-  const profile = getBankStatementProfile(parserProfile);
   const dateCandidates = profile.dateCandidates;
   const altDateCandidates = profile.altDateCandidates;
   const amountCandidates = profile.amountCandidates;
   const debitCandidates = profile.debitCandidates;
   const creditCandidates = profile.creditCandidates;
   const balanceCandidates = profile.balanceCandidates;
-
-  let headerRowIndex = -1;
-  let idxDate = -1;
-  let idxAmount = -1;
-  let idxDebit = -1;
-  let idxCredit = -1;
-  let idxBalance = -1;
-  let idxAltDate = -1;
-
-  for (let i = 0; i < Math.min(rows.length, 25); i += 1) {
-    const headers = rows[i].map((header) => normalizeText(header));
-    const dateIdx = findColumn(headers, dateCandidates);
-    const amountIdx = findColumn(headers, amountCandidates);
-    const debitIdx = findColumn(headers, debitCandidates);
-    const creditIdx = findColumn(headers, creditCandidates);
-    const balanceIdx = findColumn(headers, balanceCandidates);
-    const altDateIdx = findColumn(headers, altDateCandidates);
-
-    if (dateIdx !== -1 && (amountIdx !== -1 || debitIdx !== -1 || creditIdx !== -1)) {
-      headerRowIndex = i;
-      idxDate = dateIdx;
-      idxAmount = amountIdx;
-      idxDebit = debitIdx;
-      idxCredit = creditIdx;
-      idxBalance = balanceIdx;
-      idxAltDate = altDateIdx;
-      break;
-    }
-  }
+  const {
+    headerRowIndex,
+    idxDate,
+    idxAmount,
+    idxDebit,
+    idxCredit,
+    idxBalance,
+    idxAltDate,
+  } = detectBankHeaderIndexes(rows, {
+    dateCandidates,
+    altDateCandidates,
+    amountCandidates,
+    debitCandidates,
+    creditCandidates,
+    balanceCandidates,
+  });
 
   if (headerRowIndex === -1 || idxDate === -1) {
-    throw new Error("Не найдена колонка даты (например: Buchungstag/Wertstellung/Дата).");
+    throw new Error(
+      `Не найдена колонка даты (например: Buchungstag/Wertstellung/Дата). Разделитель: ${
+        csvCandidate.delimiterLabel
+      }`
+    );
   }
 
   if (idxAmount === -1 && idxDebit === -1 && idxCredit === -1) {
@@ -2142,6 +2133,93 @@ function detectCsvDelimiter(text) {
   });
 
   return bestScore > 0 ? best : ";";
+}
+
+function delimiterToLabel(delimiter) {
+  if (delimiter === "\t") return "TAB";
+  if (delimiter === ",") return ",";
+  return ";";
+}
+
+function detectBankHeaderIndexes(rows, candidates) {
+  const result = {
+    headerRowIndex: -1,
+    idxDate: -1,
+    idxAmount: -1,
+    idxDebit: -1,
+    idxCredit: -1,
+    idxBalance: -1,
+    idxAltDate: -1,
+  };
+
+  for (let i = 0; i < Math.min(rows.length, 35); i += 1) {
+    const headers = rows[i].map((header) => normalizeText(header));
+    const dateIdx = findColumn(headers, candidates.dateCandidates || []);
+    const amountIdx = findColumn(headers, candidates.amountCandidates || []);
+    const debitIdx = findColumn(headers, candidates.debitCandidates || []);
+    const creditIdx = findColumn(headers, candidates.creditCandidates || []);
+    const balanceIdx = findColumn(headers, candidates.balanceCandidates || []);
+    const altDateIdx = findColumn(headers, candidates.altDateCandidates || []);
+
+    if (dateIdx !== -1 && (amountIdx !== -1 || debitIdx !== -1 || creditIdx !== -1)) {
+      result.headerRowIndex = i;
+      result.idxDate = dateIdx;
+      result.idxAmount = amountIdx;
+      result.idxDebit = debitIdx;
+      result.idxCredit = creditIdx;
+      result.idxBalance = balanceIdx;
+      result.idxAltDate = altDateIdx;
+      break;
+    }
+  }
+
+  return result;
+}
+
+function parseCsvWithBestDelimiter(text, profile) {
+  const preferred = detectCsvDelimiter(text);
+  const delimiters = [...new Set([preferred, ";", "\t", ","])];
+
+  let best = null;
+
+  delimiters.forEach((delimiter) => {
+    const rows = parseCsv(text, delimiter);
+    if (!rows || rows.length < 2) return;
+
+    const headerInfo = detectBankHeaderIndexes(rows, profile);
+    const sample = rows.slice(0, Math.min(rows.length, 60));
+    const avgCols = sample.reduce((sum, row) => sum + row.length, 0) / sample.length;
+    const maxCols = sample.reduce((max, row) => Math.max(max, row.length), 0);
+
+    let score = avgCols + maxCols * 0.3;
+    if (headerInfo.headerRowIndex !== -1) score += 40;
+    if (headerInfo.idxDate !== -1) score += 80;
+    if (headerInfo.idxAmount !== -1) score += 35;
+    if (headerInfo.idxDebit !== -1 || headerInfo.idxCredit !== -1) score += 20;
+    if (avgCols <= 1.2) score -= 100;
+
+    if (!best || score > best.score) {
+      best = {
+        score,
+        delimiter,
+        delimiterLabel: delimiterToLabel(delimiter),
+        rows,
+        headerInfo,
+      };
+    }
+  });
+
+  if (best) return best;
+
+  const fallbackDelimiter = preferred || ";";
+  const fallbackRows = parseCsv(text, fallbackDelimiter);
+  return {
+    score: 0,
+    delimiter: fallbackDelimiter,
+    delimiterLabel: delimiterToLabel(fallbackDelimiter),
+    rows: fallbackRows,
+    headerInfo: detectBankHeaderIndexes(fallbackRows, profile),
+  };
 }
 
 function getMonthHintFromSelectedMonth(selectedMonth) {
