@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DDS MVP</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <h1>Справочник статей ДДС</h1>
+        <p>Изолированная MVP-версия для просмотра, фильтрации и выгрузки статей.</p>
+      </header>
+
+      <section class="metrics" id="metrics"></section>
+
+      <section class="controls">
+        <label>
+          Поиск
+          <input id="searchInput" type="search" placeholder="Название, описание, комментарий" />
+        </label>
+
+        <label>
+          Группа
+          <select id="groupFilter">
+            <option value="all">Все</option>
+          </select>
+        </label>
+
+        <label>
+          Вид деятельности
+          <select id="activityFilter">
+            <option value="all">Все</option>
+          </select>
+        </label>
+
+        <label>
+          Статус
+          <select id="statusFilter">
+            <option value="all">Все</option>
+            <option value="ACTIVE">Активные</option>
+            <option value="INACTIVE">Неактуальные</option>
+            <option value="DELETE">Удалить</option>
+            <option value="RENAME">Переименовать/заменить</option>
+          </select>
+        </label>
+
+        <button id="downloadCsv" type="button">Скачать CSV</button>
+      </section>
+
+      <section class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>№ статьи</th>
+              <th>Статья ДДС</th>
+              <th>Группа</th>
+              <th>Вид деятельности</th>
+              <th>Описание</th>
+              <th>Источник</th>
+              <th>Комментарий</th>
+              <th>Статус</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
