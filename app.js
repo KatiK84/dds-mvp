@@ -317,6 +317,15 @@ function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "au
         return;
       }
 
+      const movementCount = monthTransactions.filter((tx) => Math.abs(Number(tx.amount) || 0) > 0.000001).length;
+      const balanceCount = monthTransactions.filter((tx) => Number.isFinite(tx.balance)).length;
+      if (movementCount === 0 && balanceCount === 0) {
+        alert(
+          "Не удалось распознать суммы и остатки в выписке. Попробуйте выбрать другой профиль банка или другой CSV-экспорт."
+        );
+        return;
+      }
+
       state.banks.accounts = state.banks.accounts.map((account) =>
         account.id !== accountId
           ? account
@@ -2153,7 +2162,10 @@ function detectBankHeaderIndexes(rows, candidates) {
   };
 
   for (let i = 0; i < Math.min(rows.length, 35); i += 1) {
-    const headers = rows[i].map((header) => normalizeText(header));
+    const row = rows[i] || [];
+    if (row.length < 3) continue;
+
+    const headers = row.map((header) => normalizeText(header));
     const dateIdx = findColumn(headers, candidates.dateCandidates || []);
     const amountIdx = findColumn(headers, candidates.amountCandidates || []);
     const debitIdx = findColumn(headers, candidates.debitCandidates || []);
@@ -2161,7 +2173,12 @@ function detectBankHeaderIndexes(rows, candidates) {
     const balanceIdx = findColumn(headers, candidates.balanceCandidates || []);
     const altDateIdx = findColumn(headers, candidates.altDateCandidates || []);
 
-    if (dateIdx !== -1 && (amountIdx !== -1 || debitIdx !== -1 || creditIdx !== -1)) {
+    const hasSeparatedAmount = amountIdx !== -1 && amountIdx !== dateIdx;
+    const hasSeparatedDebitCredit =
+      (debitIdx !== -1 && debitIdx !== dateIdx) || (creditIdx !== -1 && creditIdx !== dateIdx);
+    const uniqueColumns = new Set([dateIdx, amountIdx, debitIdx, creditIdx].filter((idx) => idx >= 0)).size;
+
+    if (dateIdx !== -1 && (hasSeparatedAmount || hasSeparatedDebitCredit) && uniqueColumns >= 2) {
       result.headerRowIndex = i;
       result.idxDate = dateIdx;
       result.idxAmount = amountIdx;
@@ -2192,11 +2209,19 @@ function parseCsvWithBestDelimiter(text, profile) {
     const maxCols = sample.reduce((max, row) => Math.max(max, row.length), 0);
 
     let score = avgCols + maxCols * 0.3;
-    if (headerInfo.headerRowIndex !== -1) score += 40;
-    if (headerInfo.idxDate !== -1) score += 80;
-    if (headerInfo.idxAmount !== -1) score += 35;
-    if (headerInfo.idxDebit !== -1 || headerInfo.idxCredit !== -1) score += 20;
+    if (headerInfo.headerRowIndex !== -1) score += 80;
+    if (headerInfo.idxDate !== -1) score += 100;
+    if (headerInfo.idxAmount !== -1 && headerInfo.idxAmount !== headerInfo.idxDate) score += 45;
+    if (
+      (headerInfo.idxDebit !== -1 && headerInfo.idxDebit !== headerInfo.idxDate) ||
+      (headerInfo.idxCredit !== -1 && headerInfo.idxCredit !== headerInfo.idxDate)
+    ) {
+      score += 30;
+    }
     if (avgCols <= 1.2) score -= 100;
+    if (headerInfo.headerRowIndex === -1) score -= 120;
+    if (maxCols < 3) score -= 120;
+    if (delimiter === ",") score -= 8; // German bank exports almost always ";" or TAB
 
     if (!best || score > best.score) {
       best = {
