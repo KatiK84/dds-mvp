@@ -2364,7 +2364,8 @@ function detectBankHeaderIndexes(rows, candidates) {
 
     const headers = row.map((header) => normalizeText(header));
     const dateIdx = findColumn(headers, candidates.dateCandidates || []);
-    const amountIdx = findAmountColumn(headers, candidates.amountCandidates || []);
+    const sampleRows = rows.slice(i + 1, Math.min(rows.length, i + 61));
+    const amountIdx = findAmountColumn(headers, candidates.amountCandidates || [], sampleRows);
     const debitIdx = findColumn(headers, candidates.debitCandidates || []);
     const creditIdx = findColumn(headers, candidates.creditCandidates || []);
     const balanceIdx = findColumn(headers, candidates.balanceCandidates || []);
@@ -2390,17 +2391,27 @@ function detectBankHeaderIndexes(rows, candidates) {
   return result;
 }
 
-function findAmountColumn(headers, candidates) {
+function findAmountColumn(headers, candidates, sampleRows = []) {
   if (!Array.isArray(headers) || headers.length === 0) return -1;
+
+  const forbiddenInPrimaryAmount = [
+    "umsatzart",
+    "buchungstext",
+    "verwendungszweck",
+    "kategorie",
+    "ursprungsbetrag",
+    "auslagenersatz",
+    "ruecklastschrift",
+    "rücklastschrift",
+    "fremde gebuhren",
+    "fremde gebühren",
+  ];
 
   const isAmountHeader = (header) => {
     const normalized = normalizeText(header);
     if (!normalized) return false;
 
-    if (normalized.includes("umsatzart")) return false;
-    if (normalized.includes("buchungstext")) return false;
-    if (normalized.includes("verwendungszweck")) return false;
-    if (normalized.includes("kategorie")) return false;
+    if (forbiddenInPrimaryAmount.some((token) => normalized.includes(token))) return false;
 
     return (candidates || []).some((candidate) => {
       const c = normalizeText(candidate);
@@ -2414,8 +2425,43 @@ function findAmountColumn(headers, candidates) {
     });
   };
 
-  const firstMatch = headers.findIndex((header) => isAmountHeader(header));
-  if (firstMatch !== -1) return firstMatch;
+  const exactBetragIdx = headers.findIndex((header) => {
+    const normalized = normalizeText(header);
+    return normalized === "betrag" || normalized === "betrag (eur)";
+  });
+  if (exactBetragIdx !== -1) return exactBetragIdx;
+
+  const candidatesIdx = headers
+    .map((header, idx) => ({ idx, ok: isAmountHeader(header), header: normalizeText(header) }))
+    .filter((item) => item.ok)
+    .map((item) => item.idx);
+
+  if (candidatesIdx.length === 1) return candidatesIdx[0];
+  if (candidatesIdx.length > 1) {
+    // Choose the column with the highest count of parseable numeric values in nearby rows.
+    const scored = candidatesIdx.map((idx) => {
+      let parsedCount = 0;
+      let nonEmptyCount = 0;
+
+      sampleRows.forEach((row) => {
+        const raw = String(row?.[idx] || "").trim();
+        if (!raw) return;
+        nonEmptyCount += 1;
+        const amount = parseAmount(raw);
+        if (Number.isFinite(amount)) parsedCount += 1;
+      });
+
+      return { idx, parsedCount, nonEmptyCount };
+    });
+
+    scored.sort((a, b) => {
+      if (b.parsedCount !== a.parsedCount) return b.parsedCount - a.parsedCount;
+      return b.nonEmptyCount - a.nonEmptyCount;
+    });
+
+    if (scored[0].parsedCount > 0) return scored[0].idx;
+    return scored[0].idx;
+  }
 
   // Conservative fallback: most bank exports explicitly use "Betrag".
   const betragIdx = headers.findIndex((header) => normalizeText(header).includes("betrag"));
