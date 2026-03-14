@@ -80,6 +80,7 @@ const ROLE_CONFIG = {
       "banks.opening.manage",
       "banks.statement.removeMonth",
       "banks.account.status",
+      "access.users.manage",
       "articles.manage",
       "articles.export",
       "changelog.export",
@@ -136,7 +137,9 @@ const state = {
 
 const els = {
   tabs: document.querySelectorAll(".tab-btn"),
-  accessUserInput: document.getElementById("accessUserInput"),
+  accessUserSelect: document.getElementById("accessUserSelect"),
+  accessNewUserInput: document.getElementById("accessNewUserInput"),
+  accessAddUserBtn: document.getElementById("accessAddUserBtn"),
   accessRoleSelect: document.getElementById("accessRoleSelect"),
   accessApplyRole: document.getElementById("accessApplyRole"),
   accessRoleHint: document.getElementById("accessRoleHint"),
@@ -248,13 +251,20 @@ function setActiveTab(tabName) {
 }
 
 function bindAccessEvents() {
-  if (!els.accessRoleSelect || !els.accessApplyRole || !els.accessUserInput) return;
+  if (!els.accessRoleSelect || !els.accessApplyRole || !els.accessUserSelect) return;
+  refreshAccessUserOptions();
   els.accessRoleSelect.value = state.access.currentRole;
-  els.accessUserInput.value = normalizeUserName(state.access.currentUser);
+  els.accessUserSelect.value = normalizeUserName(state.access.currentUser);
   els.accessApplyRole.addEventListener("click", () => {
     const nextRole = String(els.accessRoleSelect.value || "").trim().toUpperCase();
-    const nextUser = normalizeUserName(els.accessUserInput.value);
+    const nextUser = normalizeUserName(els.accessUserSelect.value);
     setAccessRole(nextRole, nextUser);
+  });
+  els.accessAddUserBtn?.addEventListener("click", addAccessUser);
+  els.accessNewUserInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addAccessUser();
   });
 }
 
@@ -289,11 +299,12 @@ function setAccessRole(nextRole, nextUserRaw) {
     const confirmed = window.confirm(`Сменить роль: ${roleLabel(current)} -> ${roleLabel(normalized)}?`);
     if (!confirmed) {
       els.accessRoleSelect.value = current;
-      if (els.accessUserInput) els.accessUserInput.value = currentUser;
+      if (els.accessUserSelect) els.accessUserSelect.value = currentUser;
       return;
     }
   }
 
+  state.access.users = normalizeUsersList(state.access.users, normalizedUser);
   state.access.currentUser = normalizedUser;
   state.access.currentRole = normalized;
   saveAccessState(state.access);
@@ -332,13 +343,12 @@ function roleLabel(role) {
 function applyRoleAccess() {
   const role = ROLE_CONFIG[state.access.currentRole] ? state.access.currentRole : "VIEWER";
   const user = normalizeUserName(state.access.currentUser);
+  state.access.users = normalizeUsersList(state.access.users, user);
   if (state.access.currentUser !== user) {
     state.access.currentUser = user;
     saveAccessState(state.access);
   }
-  if (els.accessUserInput) {
-    els.accessUserInput.value = user;
-  }
+  refreshAccessUserOptions(user);
   if (els.accessRoleSelect) {
     els.accessRoleSelect.value = role;
   }
@@ -354,6 +364,7 @@ function applyRoleAccess() {
   const canExportArticles = hasPermission("articles.export");
   const canExportChangeLog = hasPermission("changelog.export");
   const canClearChangeLog = hasPermission("changelog.clear");
+  const canManageUsers = hasPermission("access.users.manage");
 
   setElementDisabled(els.operationsFile, !canImportReport);
   setElementDisabled(els.loadSampleBtn, !canImportReport);
@@ -368,8 +379,67 @@ function applyRoleAccess() {
   setElementDisabled(els.downloadArticlesCsv, !canExportArticles);
   setElementDisabled(els.changeLogExportBtn, !canExportChangeLog);
   setElementDisabled(els.changeLogClearBtn, !canClearChangeLog);
+  setElementDisabled(els.accessAddUserBtn, !canManageUsers);
+  setElementDisabled(els.accessNewUserInput, !canManageUsers);
   if (!canManageArticles) {
     closeArticleForm();
+  }
+}
+
+function addAccessUser() {
+  if (!requirePermission("access.users.manage", "Недостаточно прав: только Админ может добавлять пользователей.")) return;
+  const rawName = String(els.accessNewUserInput?.value || "");
+  const normalizedRaw = rawName.replace(/\s+/g, " ").trim();
+  if (!normalizedRaw) {
+    alert("Введите имя пользователя.");
+    return;
+  }
+
+  const normalized = normalizeUserName(normalizedRaw);
+  const users = normalizeUsersList(state.access.users, state.access.currentUser);
+  const exists = users.some((name) => normalizeText(name) === normalizeText(normalized));
+  if (exists) {
+    alert(`Пользователь "${normalized}" уже существует.`);
+    state.access.currentUser = users.find((name) => normalizeText(name) === normalizeText(normalized)) || normalized;
+    refreshAccessUserOptions(state.access.currentUser);
+    return;
+  }
+
+  state.access.users = normalizeUsersList([...users, normalized], normalized);
+  state.access.currentUser = normalized;
+  saveAccessState(state.access);
+  refreshAccessUserOptions(normalized);
+  if (els.accessNewUserInput) {
+    els.accessNewUserInput.value = "";
+  }
+  logChange("USER_ADDED", "Доступ", `Добавлен пользователь: ${normalized}`);
+  applyRoleAccess();
+}
+
+function refreshAccessUserOptions(preferredUser) {
+  const preferred = normalizeUserName(preferredUser ?? state.access.currentUser);
+  const previousUsers = Array.isArray(state.access.users) ? state.access.users.slice() : [];
+  const normalizedUsers = normalizeUsersList(previousUsers, preferred);
+  const normalizedCurrent =
+    normalizedUsers.find((name) => normalizeText(name) === normalizeText(preferred)) || normalizedUsers[0] || "Не указан";
+
+  const usersChanged =
+    normalizedUsers.length !== previousUsers.length ||
+    normalizedUsers.some((name, index) => normalizeText(name) !== normalizeText(previousUsers[index]));
+  const currentChanged = normalizeText(state.access.currentUser) !== normalizeText(normalizedCurrent);
+
+  state.access.users = normalizedUsers;
+  state.access.currentUser = normalizedCurrent;
+
+  if (els.accessUserSelect) {
+    els.accessUserSelect.innerHTML = normalizedUsers
+      .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+      .join("");
+    els.accessUserSelect.value = normalizedCurrent;
+  }
+
+  if (usersChanged || currentChanged) {
+    saveAccessState(state.access);
   }
 }
 
@@ -2610,7 +2680,7 @@ function saveArticles(articles) {
 }
 
 function loadAccessState() {
-  const fallback = { currentRole: "ADMIN", currentUser: "Не указан" };
+  const fallback = { currentRole: "ADMIN", currentUser: "Не указан", users: ["Не указан"] };
 
   try {
     const raw = localStorage.getItem(STORAGE_ACCESS_KEY);
@@ -2618,10 +2688,12 @@ function loadAccessState() {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return fallback;
     const role = String(parsed.currentRole || "").trim().toUpperCase();
-    const user = normalizeUserName(parsed.currentUser);
+    const user = normalizeUserName(parsed.currentUser || fallback.currentUser);
+    const users = normalizeUsersList(parsed.users, user);
     return {
       currentRole: ROLE_CONFIG[role] ? role : fallback.currentRole,
-      currentUser: user,
+      currentUser: users.find((name) => normalizeText(name) === normalizeText(user)) || users[0],
+      users,
     };
   } catch (error) {
     console.warn("Cannot load access state from localStorage", error);
@@ -3603,6 +3675,29 @@ function normalizeUserName(value) {
     .replace(/\s+/g, " ")
     .trim();
   return name || "Не указан";
+}
+
+function normalizeUsersList(users, fallbackUser) {
+  const seen = new Set();
+  const normalized = [];
+
+  const addUser = (value) => {
+    const safeName = normalizeUserName(value);
+    const key = normalizeText(safeName);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    normalized.push(safeName);
+  };
+
+  if (Array.isArray(users)) {
+    users.forEach(addUser);
+  }
+  addUser(fallbackUser);
+
+  if (normalized.length === 0) {
+    normalized.push("Не указан");
+  }
+  return normalized;
 }
 
 function normalizeText(value) {

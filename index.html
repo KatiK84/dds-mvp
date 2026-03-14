@@ -18,7 +18,11 @@
         <div class="controls-grid access-grid">
           <label>
             Текущий пользователь
-            <input id="accessUserInput" type="text" placeholder="Например: Katja" />
+            <select id="accessUserSelect"></select>
+          </label>
+          <label>
+            Новый пользователь
+            <input id="accessNewUserInput" type="text" placeholder="Например: Katja" />
           </label>
           <label>
             Текущая роль
@@ -28,6 +32,7 @@
               <option value="VIEWER">Просмотр</option>
             </select>
           </label>
+          <button id="accessAddUserBtn" type="button" class="secondary">Добавить пользователя</button>
           <button id="accessApplyRole" type="button">Применить роль</button>
         </div>
         <p id="accessRoleHint" class="status"></p>
