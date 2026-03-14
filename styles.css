@@ -50,7 +50,7 @@ body {
 }
 
 .access-grid {
-  grid-template-columns: minmax(220px, 320px) minmax(180px, 220px);
+  grid-template-columns: minmax(220px, 320px) minmax(180px, 220px) minmax(160px, 220px);
 }
 
 .tab-btn {

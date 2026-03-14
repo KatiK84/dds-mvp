@@ -17,6 +17,10 @@
         <h2>Роли и права</h2>
         <div class="controls-grid access-grid">
           <label>
+            Текущий пользователь
+            <input id="accessUserInput" type="text" placeholder="Например: Katja" />
+          </label>
+          <label>
             Текущая роль
             <select id="accessRoleSelect">
               <option value="ADMIN">Админ</option>
@@ -34,6 +38,7 @@
         <button class="tab-btn" data-tab="reconcile">Разнесение платежей</button>
         <button class="tab-btn" data-tab="banks">Банки</button>
         <button class="tab-btn" data-tab="articles">Статьи ДДС</button>
+        <button class="tab-btn" data-tab="changelog">Журнал изменений</button>
       </nav>
 
       <section class="tab-panel active" id="reportTab">
@@ -389,6 +394,66 @@
                 </tr>
               </thead>
               <tbody id="articlesTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="changeLogTab">
+        <section class="card">
+          <h2>Журнал изменений</h2>
+          <div class="controls-grid">
+            <label>
+              Поиск
+              <input id="changeLogSearch" type="search" placeholder="Действие, объект, детали" />
+            </label>
+
+            <label>
+              Действие
+              <select id="changeLogActionFilter">
+                <option value="all">Все</option>
+              </select>
+            </label>
+
+            <label>
+              Роль
+              <select id="changeLogRoleFilter">
+                <option value="all">Все</option>
+                <option value="ADMIN">Админ</option>
+                <option value="OPERATOR">Оператор</option>
+                <option value="VIEWER">Просмотр</option>
+              </select>
+            </label>
+
+            <label>
+              Дата с
+              <input id="changeLogDateFrom" type="date" />
+            </label>
+
+            <label>
+              Дата по
+              <input id="changeLogDateTo" type="date" />
+            </label>
+
+            <button id="changeLogExportBtn" type="button" class="secondary">Скачать журнал CSV</button>
+            <button id="changeLogClearBtn" type="button" class="secondary">Очистить журнал</button>
+          </div>
+
+          <p id="changeLogStatus" class="status">Записей: 0.</p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Время</th>
+                  <th>Пользователь</th>
+                  <th>Роль</th>
+                  <th>Действие</th>
+                  <th>Объект</th>
+                  <th>Детали</th>
+                </tr>
+              </thead>
+              <tbody id="changeLogTableBody"></tbody>
             </table>
           </div>
         </section>

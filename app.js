@@ -61,6 +61,8 @@ const SAMPLE_OPERATIONS = `Дата;Контрагент;Статья ДДС;С�
 const STORAGE_ARTICLES_KEY = "dds_mvp_articles_v2";
 const STORAGE_BANKS_KEY = "dds_mvp_banks_v1";
 const STORAGE_ACCESS_KEY = "dds_mvp_access_v1";
+const STORAGE_CHANGE_LOG_KEY = "dds_mvp_change_log_v1";
+const CHANGE_LOG_LIMIT = 3000;
 const UNKNOWN_ARTICLE = "Статья неизвестна";
 const UNKNOWN_ACTIVITY = "03 Финансовая деятельность";
 const ROLE_CONFIG = {
@@ -80,6 +82,8 @@ const ROLE_CONFIG = {
       "banks.account.status",
       "articles.manage",
       "articles.export",
+      "changelog.export",
+      "changelog.clear",
     ],
   },
   OPERATOR: {
@@ -95,12 +99,13 @@ const ROLE_CONFIG = {
       "banks.opening.manage",
       "banks.statement.removeMonth",
       "articles.export",
+      "changelog.export",
     ],
   },
   VIEWER: {
     label: "Просмотр",
     rightsLabel: "Только просмотр и выгрузки, без изменений данных.",
-    permissions: ["report.export", "reconcile.export", "articles.export"],
+    permissions: ["report.export", "reconcile.export", "articles.export", "changelog.export"],
   },
 };
 const BANK_PARSER_PROFILES = [
@@ -115,6 +120,7 @@ const state = {
   articles: loadArticles(),
   banks: loadBanksState(),
   access: loadAccessState(),
+  changeLog: loadChangeLog(),
   banksUi: {
     search: "",
     status: "active",
@@ -130,6 +136,7 @@ const state = {
 
 const els = {
   tabs: document.querySelectorAll(".tab-btn"),
+  accessUserInput: document.getElementById("accessUserInput"),
   accessRoleSelect: document.getElementById("accessRoleSelect"),
   accessApplyRole: document.getElementById("accessApplyRole"),
   accessRoleHint: document.getElementById("accessRoleHint"),
@@ -137,6 +144,16 @@ const els = {
   banksTab: document.getElementById("banksTab"),
   reconcileTab: document.getElementById("reconcileTab"),
   articlesTab: document.getElementById("articlesTab"),
+  changeLogTab: document.getElementById("changeLogTab"),
+  changeLogSearch: document.getElementById("changeLogSearch"),
+  changeLogActionFilter: document.getElementById("changeLogActionFilter"),
+  changeLogRoleFilter: document.getElementById("changeLogRoleFilter"),
+  changeLogDateFrom: document.getElementById("changeLogDateFrom"),
+  changeLogDateTo: document.getElementById("changeLogDateTo"),
+  changeLogExportBtn: document.getElementById("changeLogExportBtn"),
+  changeLogClearBtn: document.getElementById("changeLogClearBtn"),
+  changeLogStatus: document.getElementById("changeLogStatus"),
+  changeLogTableBody: document.getElementById("changeLogTableBody"),
   legalEntityForm: document.getElementById("legalEntityForm"),
   legalEntityNameInput: document.getElementById("legalEntityNameInput"),
   bankAccountForm: document.getElementById("bankAccountForm"),
@@ -194,6 +211,7 @@ function init() {
   cleanupLegacyPlaceholderEntities(true);
   bindTabs();
   bindAccessEvents();
+  bindChangeLogEvents();
   bindReportEvents();
   bindBankEvents();
   bindReconcileEvents();
@@ -205,6 +223,7 @@ function init() {
   renderArticlesTable();
   renderReport();
   renderReconcileTable();
+  renderChangeLog();
   applyRoleAccess();
 }
 
@@ -225,38 +244,72 @@ function setActiveTab(tabName) {
   els.banksTab.classList.toggle("active", tabName === "banks");
   els.reconcileTab.classList.toggle("active", tabName === "reconcile");
   els.articlesTab.classList.toggle("active", tabName === "articles");
+  els.changeLogTab.classList.toggle("active", tabName === "changelog");
 }
 
 function bindAccessEvents() {
-  if (!els.accessRoleSelect || !els.accessApplyRole) return;
+  if (!els.accessRoleSelect || !els.accessApplyRole || !els.accessUserInput) return;
   els.accessRoleSelect.value = state.access.currentRole;
+  els.accessUserInput.value = normalizeUserName(state.access.currentUser);
   els.accessApplyRole.addEventListener("click", () => {
     const nextRole = String(els.accessRoleSelect.value || "").trim().toUpperCase();
-    setAccessRole(nextRole);
+    const nextUser = normalizeUserName(els.accessUserInput.value);
+    setAccessRole(nextRole, nextUser);
   });
 }
 
-function setAccessRole(nextRole) {
+function bindChangeLogEvents() {
+  if (!els.changeLogTab) return;
+
+  const rerender = () => renderChangeLog();
+  els.changeLogSearch.addEventListener("input", rerender);
+  els.changeLogActionFilter.addEventListener("change", rerender);
+  els.changeLogRoleFilter.addEventListener("change", rerender);
+  els.changeLogDateFrom.addEventListener("change", rerender);
+  els.changeLogDateTo.addEventListener("change", rerender);
+
+  els.changeLogExportBtn.addEventListener("click", exportChangeLogCsv);
+  els.changeLogClearBtn.addEventListener("click", clearChangeLog);
+}
+
+function setAccessRole(nextRole, nextUserRaw) {
   const normalized = ROLE_CONFIG[nextRole] ? nextRole : "VIEWER";
+  const normalizedUser = normalizeUserName(nextUserRaw);
   const current = state.access.currentRole;
-  if (normalized === current) {
+  const currentUser = normalizeUserName(state.access.currentUser);
+  const roleChanged = normalized !== current;
+  const userChanged = normalizedUser !== currentUser;
+
+  if (!roleChanged && !userChanged) {
     applyRoleAccess();
     return;
   }
 
-  const confirmed = window.confirm(`Сменить роль: ${roleLabel(current)} -> ${roleLabel(normalized)}?`);
-  if (!confirmed) {
-    els.accessRoleSelect.value = current;
-    return;
+  if (roleChanged) {
+    const confirmed = window.confirm(`Сменить роль: ${roleLabel(current)} -> ${roleLabel(normalized)}?`);
+    if (!confirmed) {
+      els.accessRoleSelect.value = current;
+      if (els.accessUserInput) els.accessUserInput.value = currentUser;
+      return;
+    }
   }
 
+  state.access.currentUser = normalizedUser;
   state.access.currentRole = normalized;
   saveAccessState(state.access);
-  closeArticleForm();
-  renderBanksTab();
-  renderArticlesTable();
-  renderReport();
-  renderReconcileTable();
+  if (userChanged) {
+    logChange("USER_CHANGED", "Доступ", `${currentUser} -> ${normalizedUser}`);
+  }
+  if (roleChanged) {
+    logChange("ROLE_CHANGED", "Доступ", `${roleLabel(current)} -> ${roleLabel(normalized)}`);
+    closeArticleForm();
+    renderBanksTab();
+    renderArticlesTable();
+    renderReport();
+    renderReconcileTable();
+  } else {
+    renderChangeLog();
+  }
   applyRoleAccess();
 }
 
@@ -278,11 +331,19 @@ function roleLabel(role) {
 
 function applyRoleAccess() {
   const role = ROLE_CONFIG[state.access.currentRole] ? state.access.currentRole : "VIEWER";
+  const user = normalizeUserName(state.access.currentUser);
+  if (state.access.currentUser !== user) {
+    state.access.currentUser = user;
+    saveAccessState(state.access);
+  }
+  if (els.accessUserInput) {
+    els.accessUserInput.value = user;
+  }
   if (els.accessRoleSelect) {
     els.accessRoleSelect.value = role;
   }
   if (els.accessRoleHint) {
-    els.accessRoleHint.textContent = `Роль: ${roleLabel(role)}. ${ROLE_CONFIG[role].rightsLabel}`;
+    els.accessRoleHint.textContent = `Пользователь: ${user}. Роль: ${roleLabel(role)}. ${ROLE_CONFIG[role].rightsLabel}`;
   }
 
   const canImportReport = hasPermission("report.import");
@@ -291,6 +352,8 @@ function applyRoleAccess() {
   const canExportReconcile = hasPermission("reconcile.export");
   const canManageArticles = hasPermission("articles.manage");
   const canExportArticles = hasPermission("articles.export");
+  const canExportChangeLog = hasPermission("changelog.export");
+  const canClearChangeLog = hasPermission("changelog.clear");
 
   setElementDisabled(els.operationsFile, !canImportReport);
   setElementDisabled(els.loadSampleBtn, !canImportReport);
@@ -303,6 +366,8 @@ function applyRoleAccess() {
 
   setElementDisabled(els.addArticleBtn, !canManageArticles);
   setElementDisabled(els.downloadArticlesCsv, !canExportArticles);
+  setElementDisabled(els.changeLogExportBtn, !canExportChangeLog);
+  setElementDisabled(els.changeLogClearBtn, !canClearChangeLog);
   if (!canManageArticles) {
     closeArticleForm();
   }
@@ -474,6 +539,7 @@ function onAddLegalEntity(event) {
     name,
   });
 
+  logChange("LEGAL_ENTITY_ADDED", "Банки", `Добавлено юрлицо "${name}"`);
   els.legalEntityNameInput.value = "";
   persistBanksAndRender();
 }
@@ -508,6 +574,7 @@ function onAddBankAccount(event) {
     summary: null,
   });
 
+  logChange("BANK_ACCOUNT_ADDED", "Банки", `Добавлен счет "${name}"`);
   els.bankAccountNameInput.value = "";
   persistBanksAndRender();
 }
@@ -571,6 +638,12 @@ function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "au
             })
       );
 
+      const accountName = state.banks.accounts.find((item) => item.id === accountId)?.name || `Счет ${accountId}`;
+      logChange(
+        "BANK_STATEMENT_UPLOADED",
+        "Банки",
+        `${accountName}; месяц ${selectedMonth}; файл ${file.name}; операций ${monthTransactions.length}`
+      );
       persistBanksAndRender();
     } catch (error) {
       alert(`Ошибка загрузки выписки: ${error.message}`);
@@ -587,9 +660,13 @@ function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "au
 function setBankParserProfile(accountId, parserProfile) {
   if (!requirePermission("banks.statement.profile", "Недостаточно прав: роль не позволяет менять профиль банка.")) return;
   const normalizedProfile = BANK_PARSER_PROFILES.some((item) => item.value === parserProfile) ? parserProfile : "auto";
+  const account = state.banks.accounts.find((item) => item.id === accountId);
+  if (!account) return;
+  if (String(account.parserProfile || "auto") === normalizedProfile) return;
   state.banks.accounts = state.banks.accounts.map((account) =>
     account.id === accountId ? { ...account, parserProfile: normalizedProfile } : account
   );
+  logChange("BANK_PROFILE_CHANGED", "Банки", `${account.name}: профиль "${normalizedProfile}"`);
   persistBanksAndRender();
 }
 
@@ -620,6 +697,8 @@ function setManualOpeningBalance(accountId, monthKey, amountRaw) {
     }, account.monthlyStatements || {});
   });
 
+  const accountName = state.banks.accounts.find((item) => item.id === accountId)?.name || `Счет ${accountId}`;
+  logChange("BANK_OPENING_SET", "Банки", `${accountName}; ${normalizedMonth}: ${formatMoney(amount)}`);
   persistBanksAndRender();
 }
 
@@ -643,6 +722,8 @@ function clearManualOpeningBalance(accountId, monthKey) {
     }, account.monthlyStatements || {});
   });
 
+  const accountName = state.banks.accounts.find((item) => item.id === accountId)?.name || `Счет ${accountId}`;
+  logChange("BANK_OPENING_CLEARED", "Банки", `${accountName}; ${normalizedMonth}`);
   persistBanksAndRender();
 }
 
@@ -718,6 +799,7 @@ function removeMonthlyStatement(accountId, monthKey) {
     return rebuildAccountFromMonthlyStatements(item, nextStatements);
   });
 
+  logChange("BANK_MONTH_REMOVED", "Банки", `${account.name}; удален месяц ${normalizedMonth}`);
   persistBanksAndRender();
 }
 
@@ -744,6 +826,7 @@ function deleteBankAccountSafely(accountId) {
     item.id === accountId ? { ...item, status: "DELETED" } : item
   );
 
+  logChange("BANK_ACCOUNT_DELETED", "Банки", `Удален счет "${account.name}"`);
   persistBanksAndRender();
 }
 
@@ -759,6 +842,7 @@ function restoreBankAccount(accountId) {
     item.id === accountId ? { ...item, status: "ACTIVE" } : item
   );
 
+  logChange("BANK_ACCOUNT_RESTORED", "Банки", `Восстановлен счет "${account.name}"`);
   persistBanksAndRender();
 }
 
@@ -1573,6 +1657,7 @@ function loadOperationsFromText(csvText, sourceName) {
     }
 
     els.fileStatus.textContent = `Загружено: ${sourceName}. Операций: ${parsed.length}.`;
+    logChange("OPERATIONS_LOADED", "Отчет ДДС", `Источник: ${sourceName}; операций: ${parsed.length}`);
     renderReport();
   } catch (error) {
     state.operationsRaw = [];
@@ -1957,11 +2042,20 @@ function applyManualAssignment(rowId) {
   const selectEl = els.reconcileTableBody.querySelector(`select[data-row-id="${rowId}"]`);
   if (!selectEl) return;
 
+  const previousValue = state.manualAssignments[rowId] || "";
   const selectedArticle = selectEl.value.trim();
   if (selectedArticle) {
     state.manualAssignments[rowId] = selectedArticle;
   } else {
     delete state.manualAssignments[rowId];
+  }
+
+  if (selectedArticle !== previousValue) {
+    const operation = state.operationsRaw.find((op) => op.rowId === rowId);
+    const opDate = operation?.dateObj ? toDateInputValue(operation.dateObj) : "н/д";
+    const opCounterparty = operation?.counterparty || "-";
+    const nextLabel = selectedArticle || "Не выбрано";
+    logChange("RECONCILE_ASSIGNED", "Разнесение платежей", `Строка ${rowId}; дата ${opDate}; контрагент ${opCounterparty}; статья: ${nextLabel}`);
   }
 
   renderReport();
@@ -2167,8 +2261,13 @@ function onArticleFormSubmit(event) {
     status: els.articleStatusInput.value,
   };
 
+  let action = "ARTICLE_CREATED";
+  let details = `Создана статья "${payload.name}"`;
   if (id) {
+    const prev = state.articles.find((row) => row.id === id);
     state.articles = state.articles.map((row) => (row.id === id ? { ...row, ...payload } : row));
+    action = "ARTICLE_UPDATED";
+    details = `Обновлена статья "${prev?.name || payload.name}" -> "${payload.name}"`;
   } else {
     state.articles.push({
       id: getNextArticleId(),
@@ -2177,6 +2276,7 @@ function onArticleFormSubmit(event) {
     });
   }
 
+  logChange(action, "Статьи ДДС", details);
   persistAndRerenderAfterArticleChange();
   closeArticleForm();
 }
@@ -2199,6 +2299,7 @@ function renameArticle(id) {
     return { ...item, name: cleanName, aliases };
   });
 
+  logChange("ARTICLE_RENAMED", "Статьи ДДС", `"${article.name}" -> "${cleanName}"`);
   persistAndRerenderAfterArticleChange();
 }
 
@@ -2214,12 +2315,15 @@ function markArticleDeleted(id) {
     item.id === id ? { ...item, status: "DELETE" } : item
   );
 
+  logChange("ARTICLE_DELETED", "Статьи ДДС", `Статья "${article.name}" помечена как удаленная`);
   persistAndRerenderAfterArticleChange();
 }
 
 function restoreArticle(id) {
   if (!hasPermission("articles.manage")) return;
+  const article = state.articles.find((item) => item.id === id);
   state.articles = state.articles.map((item) => (item.id === id ? { ...item, status: "ACTIVE" } : item));
+  logChange("ARTICLE_RESTORED", "Статьи ДДС", `Статья "${article?.name || id}" восстановлена`);
   persistAndRerenderAfterArticleChange();
 }
 
@@ -2312,6 +2416,132 @@ function downloadArticlesCsv() {
   triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), "dds-articles.csv");
 }
 
+function renderChangeLog() {
+  if (!els.changeLogTableBody || !els.changeLogStatus) return;
+
+  const query = normalizeText(els.changeLogSearch?.value || "");
+  const actionFilter = String(els.changeLogActionFilter?.value || "all");
+  const roleFilter = String(els.changeLogRoleFilter?.value || "all");
+  const dateFrom = els.changeLogDateFrom?.value ? parseFlexibleDate(els.changeLogDateFrom.value) : null;
+  const dateTo = els.changeLogDateTo?.value ? parseFlexibleDate(els.changeLogDateTo.value) : null;
+  if (dateTo) {
+    dateTo.setHours(23, 59, 59, 999);
+  }
+
+  const filtered = state.changeLog.filter((entry) => {
+    if (actionFilter !== "all" && entry.action !== actionFilter) return false;
+    if (roleFilter !== "all" && entry.role !== roleFilter) return false;
+
+    const entryDate = parseFlexibleDate(entry.timestamp);
+    if (dateFrom && (!entryDate || entryDate < dateFrom)) return false;
+    if (dateTo && (!entryDate || entryDate > dateTo)) return false;
+
+    if (query) {
+      const haystack = normalizeText(`${entry.user} ${entry.action} ${entry.entity} ${entry.details}`);
+      if (!haystack.includes(query)) return false;
+    }
+
+    return true;
+  });
+
+  const actions = uniqueValues(state.changeLog.map((entry) => entry.action).filter(Boolean));
+  const currentAction = String(els.changeLogActionFilter.value || "all");
+  els.changeLogActionFilter.innerHTML = `<option value="all">Все</option>${actions
+    .map((action) => `<option value="${escapeHtml(action)}">${escapeHtml(action)}</option>`)
+    .join("")}`;
+  const canRestoreAction = [...els.changeLogActionFilter.options].some((opt) => opt.value === currentAction);
+  els.changeLogActionFilter.value = canRestoreAction ? currentAction : "all";
+
+  if (filtered.length === 0) {
+    els.changeLogTableBody.innerHTML = `<tr><td colspan="6" class="empty">По фильтрам записей нет.</td></tr>`;
+  } else {
+    els.changeLogTableBody.innerHTML = filtered
+      .map(
+        (entry) => `
+        <tr>
+          <td>${escapeHtml(formatDateTime(entry.timestamp))}</td>
+          <td>${escapeHtml(entry.user || "Не указан")}</td>
+          <td>${escapeHtml(roleLabel(entry.role))}</td>
+          <td>${escapeHtml(entry.action)}</td>
+          <td>${escapeHtml(entry.entity)}</td>
+          <td>${escapeHtml(entry.details || "-")}</td>
+        </tr>
+      `
+      )
+      .join("");
+  }
+
+  els.changeLogStatus.textContent = `Записей: ${filtered.length} (всего: ${state.changeLog.length}).`;
+}
+
+function logChange(action, entity, details) {
+  const safeAction = String(action || "").trim();
+  const safeEntity = String(entity || "").trim();
+  if (!safeAction || !safeEntity) return;
+
+  const entry = {
+    id: getNextId(state.changeLog),
+    timestamp: new Date().toISOString(),
+    user: normalizeUserName(state.access.currentUser),
+    role: state.access.currentRole,
+    action: safeAction,
+    entity: safeEntity,
+    details: String(details || "").trim(),
+  };
+
+  state.changeLog.unshift(entry);
+  if (state.changeLog.length > CHANGE_LOG_LIMIT) {
+    state.changeLog = state.changeLog.slice(0, CHANGE_LOG_LIMIT);
+  }
+
+  saveChangeLog(state.changeLog);
+  renderChangeLog();
+}
+
+function exportChangeLogCsv() {
+  if (!requirePermission("changelog.export", "Недостаточно прав: роль не позволяет выгружать журнал изменений.")) return;
+
+  const rows = state.changeLog;
+  if (rows.length === 0) {
+    if (els.changeLogStatus) els.changeLogStatus.textContent = "Журнал пуст.";
+    return;
+  }
+
+  const headers = ["Время", "Пользователь", "Роль", "Действие", "Объект", "Детали"];
+  const lines = rows.map((entry) => [
+    formatDateTime(entry.timestamp),
+    entry.user || "Не указан",
+    roleLabel(entry.role),
+    entry.action,
+    entry.entity,
+    entry.details || "",
+  ]);
+
+  const csv = [headers, ...lines]
+    .map((line) => line.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(";"))
+    .join("\n");
+
+  triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), "dds-change-log.csv");
+}
+
+function clearChangeLog() {
+  if (!requirePermission("changelog.clear", "Недостаточно прав: только Админ может очищать журнал изменений.")) return;
+  if (state.changeLog.length === 0) return;
+
+  const firstConfirm = window.confirm("Очистить журнал изменений полностью?");
+  if (!firstConfirm) return;
+
+  const phrase = window.prompt("Для подтверждения введите: ОЧИСТИТЬ ЖУРНАЛ");
+  if (phrase !== "ОЧИСТИТЬ ЖУРНАЛ") {
+    alert("Очистка отменена: подтверждение не совпало.");
+    return;
+  }
+
+  state.changeLog = [];
+  saveChangeLog(state.changeLog);
+  renderChangeLog();
+}
+
 function triggerDownload(blob, fileName) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -2382,7 +2612,7 @@ function saveArticles(articles) {
 }
 
 function loadAccessState() {
-  const fallback = { currentRole: "ADMIN" };
+  const fallback = { currentRole: "ADMIN", currentUser: "Не указан" };
 
   try {
     const raw = localStorage.getItem(STORAGE_ACCESS_KEY);
@@ -2390,12 +2620,47 @@ function loadAccessState() {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return fallback;
     const role = String(parsed.currentRole || "").trim().toUpperCase();
+    const user = normalizeUserName(parsed.currentUser);
     return {
       currentRole: ROLE_CONFIG[role] ? role : fallback.currentRole,
+      currentUser: user,
     };
   } catch (error) {
     console.warn("Cannot load access state from localStorage", error);
     return fallback;
+  }
+}
+
+function loadChangeLog() {
+  try {
+    const raw = localStorage.getItem(STORAGE_CHANGE_LOG_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((row, idx) => ({
+        id: Number(row?.id) || idx + 1,
+        timestamp: String(row?.timestamp || ""),
+        user: normalizeUserName(row?.user),
+        role: ROLE_CONFIG[String(row?.role || "").toUpperCase()] ? String(row.role).toUpperCase() : "VIEWER",
+        action: String(row?.action || "").trim(),
+        entity: String(row?.entity || "").trim(),
+        details: String(row?.details || "").trim(),
+      }))
+      .filter((row) => row.action && row.entity)
+      .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+  } catch (error) {
+    console.warn("Cannot load change log from localStorage", error);
+    return [];
+  }
+}
+
+function saveChangeLog(changeLog) {
+  try {
+    localStorage.setItem(STORAGE_CHANGE_LOG_KEY, JSON.stringify(changeLog || []));
+  } catch (error) {
+    console.warn("Cannot save change log to localStorage", error);
   }
 }
 
@@ -3299,6 +3564,28 @@ function formatDate(date) {
   return toDateInputValue(date);
 }
 
+function formatDateTime(value) {
+  let date = null;
+  if (typeof value === "string" && value.includes("T")) {
+    const iso = new Date(value);
+    if (!Number.isNaN(iso.getTime())) {
+      date = iso;
+    }
+  }
+  if (!date) {
+    date = parseFlexibleDate(value);
+  }
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "н/д";
+  return new Intl.DateTimeFormat("ru-RU", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
+}
+
 function formatNumberForCsv(value) {
   return Number(value || 0).toFixed(2).replace(".", ",");
 }
@@ -3311,6 +3598,13 @@ function formatNumberForInput(value) {
 function toMaybeNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function normalizeUserName(value) {
+  const name = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return name || "Не указан";
 }
 
 function normalizeText(value) {
