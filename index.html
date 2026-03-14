@@ -38,6 +38,20 @@
         <p id="accessRoleHint" class="status"></p>
       </section>
 
+      <section class="card service-card">
+        <h2>Сервис и экспорт</h2>
+        <div class="controls-grid service-grid">
+          <button id="downloadManagementPackageBtn" type="button">Скачать управленческий пакет CSV</button>
+          <button id="exportBackupBtn" type="button" class="secondary">Экспорт бэкапа (JSON)</button>
+          <label class="file-field wide">
+            <span>Файл бэкапа для восстановления</span>
+            <input id="importBackupFile" type="file" accept=".json,application/json" />
+          </label>
+          <button id="importBackupBtn" type="button" class="secondary">Восстановить из бэкапа</button>
+        </div>
+        <p id="serviceStatus" class="status">Можно выгрузить пакет отчетов и полный бэкап состояния приложения.</p>
+      </section>
+
       <nav class="tabs" aria-label="Разделы приложения">
         <button class="tab-btn active" data-tab="report">Отчет ДДС</button>
         <button class="tab-btn" data-tab="plan">План/Прогноз</button>
@@ -671,6 +685,52 @@
               </label>
               <button type="submit">Добавить счет</button>
             </form>
+          </div>
+
+          <div class="folder-import-block">
+            <h3>Импорт папкой (предпросмотр перед сохранением)</h3>
+            <div class="controls-grid folder-import-controls">
+              <label>
+                Юрлицо для импорта
+                <select id="bankFolderEntitySelect"></select>
+              </label>
+              <label>
+                Профиль парсера
+                <select id="bankFolderParserProfile">
+                  <option value="auto">Автоопределение</option>
+                  <option value="deutsche">Deutsche Bank</option>
+                  <option value="commerz">Commerzbank</option>
+                  <option value="sparkasse">Sparkasse</option>
+                </select>
+              </label>
+              <label class="wide">
+                Файлы/папка CSV
+                <input id="bankFolderInput" type="file" accept=".csv,text/csv" multiple webkitdirectory directory />
+              </label>
+              <button id="bankFolderAnalyzeBtn" type="button" class="secondary">Собрать предпросмотр</button>
+              <button id="bankFolderApplyBtn" type="button">Сохранить выбранные</button>
+              <button id="bankFolderClearBtn" type="button" class="secondary">Очистить черновик</button>
+            </div>
+            <p id="bankFolderStatus" class="status">Выберите папку/несколько CSV для предпросмотра.</p>
+
+            <div class="table-wrap small">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Выбор</th>
+                    <th>Файл</th>
+                    <th>Профиль</th>
+                    <th>Счет</th>
+                    <th>Месяц</th>
+                    <th>Операций</th>
+                    <th>Поступления</th>
+                    <th>Выбытия</th>
+                    <th>Статус</th>
+                  </tr>
+                </thead>
+                <tbody id="bankFolderPreviewBody"></tbody>
+              </table>
+            </div>
           </div>
         </section>
 

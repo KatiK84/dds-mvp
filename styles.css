@@ -49,8 +49,20 @@ body {
   margin-top: 16px;
 }
 
+.service-card {
+  margin-top: 16px;
+}
+
 .access-grid {
   grid-template-columns: minmax(220px, 320px) minmax(180px, 220px) minmax(160px, 220px);
+}
+
+.service-grid {
+  grid-template-columns: repeat(2, minmax(240px, 1fr)) minmax(280px, 1.5fr) minmax(220px, 1fr);
+}
+
+.service-grid .wide {
+  grid-column: span 2;
 }
 
 .tab-btn {
@@ -170,6 +182,39 @@ button.secondary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 12px;
+}
+
+.folder-import-block {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfb;
+  padding: 12px;
+}
+
+.folder-import-block h3 {
+  margin: 0 0 10px;
+  font-size: 0.98rem;
+}
+
+.folder-import-controls {
+  grid-template-columns: minmax(220px, 1fr) minmax(200px, 1fr) minmax(320px, 2fr) repeat(3, minmax(180px, 1fr));
+}
+
+.folder-import-controls .wide {
+  grid-column: span 2;
+}
+
+.bank-folder-status.ready {
+  color: #24674c;
+}
+
+.bank-folder-status.warn {
+  color: #9a6c15;
+}
+
+.bank-folder-status.error {
+  color: #a03b3b;
 }
 
 .plan-import-grid {
@@ -659,6 +704,55 @@ tr.unresolved-row {
   margin-top: 8px;
 }
 
+.bank-template-editor {
+  margin-top: 8px;
+}
+
+.bank-template-editor details {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.bank-template-editor summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.bank-template-grid {
+  border-top: 1px dashed var(--line);
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.bank-template-grid label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.bank-template-grid input,
+.bank-template-grid select {
+  padding: 7px 8px;
+  font-size: 0.84rem;
+}
+
+.bank-template-actions {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.bank-template-actions button {
+  padding: 7px 9px;
+  font-size: 0.82rem;
+}
+
 .bank-manual-opening input[type="month"] {
   min-width: 140px;
 }
@@ -785,8 +879,13 @@ tr.unresolved-row {
   .form-grid,
   .banks-filter-grid,
   .access-grid,
+  .service-grid,
   .plan-import-grid,
   .analytics-findings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .folder-import-controls {
     grid-template-columns: 1fr;
   }
 
@@ -821,5 +920,13 @@ tr.unresolved-row {
 
   .bank-quick-metrics {
     gap: 8px;
+  }
+
+  .bank-template-actions {
+    width: 100%;
+  }
+
+  .bank-template-actions button {
+    flex: 1 1 auto;
   }
 }

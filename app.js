@@ -78,6 +78,7 @@ const STORAGE_ACCESS_KEY = "dds_mvp_access_v1";
 const STORAGE_CHANGE_LOG_KEY = "dds_mvp_change_log_v1";
 const STORAGE_PLAN_KEY = "dds_mvp_plan_v1";
 const STORAGE_ANALYTICS_KEY = "dds_mvp_analytics_v1";
+const STORAGE_RUNTIME_KEY = "dds_mvp_runtime_v1";
 const CHANGE_LOG_LIMIT = 3000;
 const ANALYTICS_PRIMARY_FINDINGS_LIMIT = 7;
 const UNKNOWN_ARTICLE = "Статья неизвестна";
@@ -140,6 +141,13 @@ const BANK_PARSER_PROFILES = [
   { value: "commerz", label: "Commerzbank" },
   { value: "sparkasse", label: "Sparkasse" },
 ];
+const BANK_TEMPLATE_DELIMITERS = [
+  { value: "auto", label: "Авто" },
+  { value: ";", label: ";" },
+  { value: ",", label: "," },
+  { value: "tab", label: "TAB" },
+];
+const runtimeState = loadRuntimeState();
 
 const state = {
   activeTab: "report",
@@ -154,12 +162,18 @@ const state = {
     status: "active",
     data: "all",
     expandedByAccountId: {},
+    folderImport: {
+      legalEntityId: 0,
+      parserProfile: "auto",
+      items: [],
+      statusText: "Выберите папку/несколько CSV для предпросмотра.",
+    },
   },
   planUi: {
     editingIndex: -1,
   },
-  operationsRaw: [],
-  manualAssignments: {},
+  operationsRaw: runtimeState.operationsRaw,
+  manualAssignments: runtimeState.manualAssignments,
   filteredOperations: [],
   reportRows: [],
   monthRows: [],
@@ -167,6 +181,11 @@ const state = {
 
 const els = {
   tabs: document.querySelectorAll(".tab-btn"),
+  downloadManagementPackageBtn: document.getElementById("downloadManagementPackageBtn"),
+  exportBackupBtn: document.getElementById("exportBackupBtn"),
+  importBackupFile: document.getElementById("importBackupFile"),
+  importBackupBtn: document.getElementById("importBackupBtn"),
+  serviceStatus: document.getElementById("serviceStatus"),
   accessUserSelect: document.getElementById("accessUserSelect"),
   accessNewUserInput: document.getElementById("accessNewUserInput"),
   accessAddUserBtn: document.getElementById("accessAddUserBtn"),
@@ -203,6 +222,14 @@ const els = {
   banksExpandWithData: document.getElementById("banksExpandWithData"),
   banksCollapseAll: document.getElementById("banksCollapseAll"),
   banksFilterStatus: document.getElementById("banksFilterStatus"),
+  bankFolderEntitySelect: document.getElementById("bankFolderEntitySelect"),
+  bankFolderParserProfile: document.getElementById("bankFolderParserProfile"),
+  bankFolderInput: document.getElementById("bankFolderInput"),
+  bankFolderAnalyzeBtn: document.getElementById("bankFolderAnalyzeBtn"),
+  bankFolderApplyBtn: document.getElementById("bankFolderApplyBtn"),
+  bankFolderClearBtn: document.getElementById("bankFolderClearBtn"),
+  bankFolderStatus: document.getElementById("bankFolderStatus"),
+  bankFolderPreviewBody: document.getElementById("bankFolderPreviewBody"),
   operationsFile: document.getElementById("operationsFile"),
   loadSampleBtn: document.getElementById("loadSampleBtn"),
   downloadTemplateBtn: document.getElementById("downloadTemplateBtn"),
@@ -314,6 +341,7 @@ init();
 function init() {
   cleanupLegacyPlaceholderEntities(true);
   bindTabs();
+  bindServiceEvents();
   bindAccessEvents();
   bindChangeLogEvents();
   bindReportEvents();
@@ -325,6 +353,10 @@ function init() {
   refreshBankEntitySelect();
   refreshArticleFilterOptions();
   refreshReportActivityOptions();
+  applyRuntimeStateToControls(runtimeState);
+  if (els.fileStatus && state.operationsRaw.length > 0) {
+    els.fileStatus.textContent = `Восстановлено операций из локального состояния: ${state.operationsRaw.length}.`;
+  }
   renderBanksTab();
   renderArticlesTable();
   renderReport();
@@ -339,6 +371,12 @@ function bindTabs() {
   els.tabs.forEach((tabBtn) => {
     tabBtn.addEventListener("click", () => setActiveTab(tabBtn.dataset.tab));
   });
+}
+
+function bindServiceEvents() {
+  els.downloadManagementPackageBtn?.addEventListener("click", downloadManagementPackageCsv);
+  els.exportBackupBtn?.addEventListener("click", exportAppBackupFile);
+  els.importBackupBtn?.addEventListener("click", importAppBackupFile);
 }
 
 function setActiveTab(tabName) {
@@ -468,6 +506,8 @@ function applyRoleAccess() {
   const canImportReport = hasPermission("report.import");
   const canExportReport = hasPermission("report.export");
   const canManageBankStructure = hasPermission("banks.structure");
+  const canUploadBankStatements = hasPermission("banks.statement.upload");
+  const canChangeBankProfile = hasPermission("banks.statement.profile");
   const canExportReconcile = hasPermission("reconcile.export");
   const canManageArticles = hasPermission("articles.manage");
   const canExportArticles = hasPermission("articles.export");
@@ -478,13 +518,25 @@ function applyRoleAccess() {
   const canExportPlan = hasPermission("plan.export");
   const canManageAnalytics = hasPermission("analytics.settings");
   const canExportAnalytics = hasPermission("analytics.export");
+  const canExportManagement = hasPermission("report.export");
+  const canManageBackup = hasPermission("access.users.manage");
 
+  setElementDisabled(els.downloadManagementPackageBtn, !canExportManagement);
+  setElementDisabled(els.exportBackupBtn, !canManageBackup);
+  setElementDisabled(els.importBackupFile, !canManageBackup);
+  setElementDisabled(els.importBackupBtn, !canManageBackup);
   setElementDisabled(els.operationsFile, !canImportReport);
   setElementDisabled(els.loadSampleBtn, !canImportReport);
   setElementDisabled(els.downloadReportCsvBtn, !canExportReport);
 
   setFormDisabled(els.legalEntityForm, !canManageBankStructure);
   setFormDisabled(els.bankAccountForm, !canManageBankStructure);
+  setElementDisabled(els.bankFolderEntitySelect, !canUploadBankStatements);
+  setElementDisabled(els.bankFolderParserProfile, !canChangeBankProfile);
+  setElementDisabled(els.bankFolderInput, !canUploadBankStatements);
+  setElementDisabled(els.bankFolderAnalyzeBtn, !canUploadBankStatements);
+  setElementDisabled(els.bankFolderApplyBtn, !canUploadBankStatements);
+  setElementDisabled(els.bankFolderClearBtn, !canUploadBankStatements);
 
   setElementDisabled(els.downloadUnresolvedCsv, !canExportReconcile);
 
@@ -2471,6 +2523,67 @@ function bindBankEvents() {
     renderBanksTab();
   });
 
+  els.bankFolderEntitySelect?.addEventListener("change", () => {
+    state.banksUi.folderImport.legalEntityId = Number(els.bankFolderEntitySelect.value) || 0;
+    renderBankFolderImportPreview();
+  });
+  els.bankFolderParserProfile?.addEventListener("change", () => {
+    state.banksUi.folderImport.parserProfile = String(els.bankFolderParserProfile.value || "auto");
+  });
+  els.bankFolderAnalyzeBtn?.addEventListener("click", analyzeBankFolderImportDraft);
+  els.bankFolderApplyBtn?.addEventListener("click", applyBankFolderImportDraft);
+  els.bankFolderClearBtn?.addEventListener("click", clearBankFolderImportDraft);
+
+  els.bankFolderPreviewBody?.addEventListener("change", (event) => {
+    const rowEl = event.target.closest("[data-folder-row]");
+    if (!rowEl) return;
+    const rowIndex = Number(rowEl.dataset.folderRow);
+    if (!Number.isFinite(rowIndex) || rowIndex < 0) return;
+    const item = state.banksUi.folderImport.items[rowIndex];
+    if (!item) return;
+
+    const includeCheckbox = event.target.closest("input[data-folder-include]");
+    if (includeCheckbox) {
+      item.include = Boolean(includeCheckbox.checked);
+      renderBankFolderImportPreview();
+      return;
+    }
+
+    const accountSelect = event.target.closest("select[data-folder-account-id]");
+    if (accountSelect) {
+      item.accountId = Number(accountSelect.value) || 0;
+      item.ready = item.accountId > 0 && Boolean(item.month) && item.operationsCount > 0;
+      item.status = item.ready
+        ? "Готово к сохранению"
+        : item.accountId <= 0
+          ? "Требуется выбрать счет"
+          : !item.month
+            ? "Требуется выбрать месяц"
+            : "Нет операций за выбранный месяц";
+      renderBankFolderImportPreview();
+      return;
+    }
+
+    const monthInput = event.target.closest("input[data-folder-month]");
+    if (monthInput) {
+      item.month = normalizeMonthKey(monthInput.value);
+      item.monthTransactions = item.month ? extractTransactionsForMonth(item.transactions, item.month) : [];
+      const summary = summarizeStatementMovement(item.monthTransactions);
+      item.operationsCount = item.monthTransactions.length;
+      item.inflow = summary.inflow;
+      item.outflow = summary.outflow;
+      item.ready = item.accountId > 0 && Boolean(item.month) && item.operationsCount > 0;
+      item.status = item.ready
+        ? "Готово к сохранению"
+        : item.accountId <= 0
+          ? "Требуется выбрать счет"
+          : !item.month
+            ? "Требуется выбрать месяц"
+            : "Нет операций за выбранный месяц";
+      renderBankFolderImportPreview();
+    }
+  });
+
   els.banksEntityBlocks.addEventListener("change", (event) => {
     const parserSelect = event.target.closest("select[data-bank-parser]");
     if (parserSelect) {
@@ -2548,6 +2661,49 @@ function bindBankEvents() {
       return;
     }
 
+    if (action === "save-template") {
+      const delimiterInput = els.banksEntityBlocks.querySelector(
+        `select[data-bank-template-delimiter][data-account-id='${accountId}']`
+      );
+      const dateInput = els.banksEntityBlocks.querySelector(
+        `input[data-bank-template-date][data-account-id='${accountId}']`
+      );
+      const altDateInput = els.banksEntityBlocks.querySelector(
+        `input[data-bank-template-alt-date][data-account-id='${accountId}']`
+      );
+      const amountInput = els.banksEntityBlocks.querySelector(
+        `input[data-bank-template-amount][data-account-id='${accountId}']`
+      );
+      const debitInput = els.banksEntityBlocks.querySelector(
+        `input[data-bank-template-debit][data-account-id='${accountId}']`
+      );
+      const creditInput = els.banksEntityBlocks.querySelector(
+        `input[data-bank-template-credit][data-account-id='${accountId}']`
+      );
+      const signInput = els.banksEntityBlocks.querySelector(
+        `input[data-bank-template-sign][data-account-id='${accountId}']`
+      );
+      const balanceInput = els.banksEntityBlocks.querySelector(
+        `input[data-bank-template-balance][data-account-id='${accountId}']`
+      );
+      setBankStatementTemplate(accountId, {
+        delimiter: String(delimiterInput?.value || "auto"),
+        date: String(dateInput?.value || ""),
+        altDate: String(altDateInput?.value || ""),
+        amount: String(amountInput?.value || ""),
+        debit: String(debitInput?.value || ""),
+        credit: String(creditInput?.value || ""),
+        sign: String(signInput?.value || ""),
+        balance: String(balanceInput?.value || ""),
+      });
+      return;
+    }
+
+    if (action === "reset-template") {
+      resetBankStatementTemplate(accountId);
+      return;
+    }
+
     if (action === "save-opening") {
       const monthInput = els.banksEntityBlocks.querySelector(`input[data-bank-opening-month][data-account-id='${accountId}']`);
       const amountInput = els.banksEntityBlocks.querySelector(`input[data-bank-opening-amount][data-account-id='${accountId}']`);
@@ -2607,6 +2763,7 @@ function onAddBankAccount(event) {
     legalEntityId,
     name,
     parserProfile: "auto",
+    statementTemplate: createDefaultBankStatementTemplate(),
     status: "ACTIVE",
     fileName: "",
     manualOpeningBalances: {},
@@ -2620,8 +2777,354 @@ function onAddBankAccount(event) {
   persistBanksAndRender();
 }
 
+function createDefaultBankStatementTemplate() {
+  return {
+    delimiter: "auto",
+    date: "",
+    altDate: "",
+    amount: "",
+    debit: "",
+    credit: "",
+    sign: "",
+    balance: "",
+  };
+}
+
+function normalizeTemplateDelimiter(value) {
+  const raw = String(value ?? "auto");
+  if (raw === "\t") return "tab";
+  const normalized = raw.trim().toLowerCase();
+  const allowed = new Set(BANK_TEMPLATE_DELIMITERS.map((item) => item.value));
+  return allowed.has(normalized) ? normalized : "auto";
+}
+
+function templateDelimiterToChar(value) {
+  const normalized = normalizeTemplateDelimiter(value);
+  if (normalized === "tab") return "\t";
+  return normalized;
+}
+
+function normalizeBankStatementTemplate(rawTemplate) {
+  const fallback = createDefaultBankStatementTemplate();
+  if (!rawTemplate || typeof rawTemplate !== "object") return fallback;
+  return {
+    delimiter: normalizeTemplateDelimiter(rawTemplate.delimiter),
+    date: String(rawTemplate.date || "").trim(),
+    altDate: String(rawTemplate.altDate || "").trim(),
+    amount: String(rawTemplate.amount || "").trim(),
+    debit: String(rawTemplate.debit || "").trim(),
+    credit: String(rawTemplate.credit || "").trim(),
+    sign: String(rawTemplate.sign || "").trim(),
+    balance: String(rawTemplate.balance || "").trim(),
+  };
+}
+
+function normalizeBankParserProfile(value) {
+  const normalized = String(value || "auto").trim().toLowerCase();
+  return BANK_PARSER_PROFILES.some((item) => item.value === normalized) ? normalized : "auto";
+}
+
+function readTextFileAsUtf8(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Не удалось прочитать файл."));
+    reader.readAsText(file, "utf-8");
+  });
+}
+
+function extractTransactionsForMonth(transactions, selectedMonth) {
+  if (!selectedMonth) return [];
+  return (transactions || [])
+    .filter((tx) => {
+      const primaryMonth = toMonthKey(tx.dateObj);
+      const altMonth = toMonthKey(tx.altDateObj);
+      return primaryMonth === selectedMonth || altMonth === selectedMonth;
+    })
+    .map((tx) => {
+      const primaryMonth = toMonthKey(tx.dateObj);
+      const altMonth = toMonthKey(tx.altDateObj);
+
+      if (primaryMonth !== selectedMonth && altMonth === selectedMonth && tx.altDateObj) {
+        return {
+          ...tx,
+          dateObj: tx.altDateObj,
+        };
+      }
+
+      return tx;
+    });
+}
+
+function summarizeStatementMovement(transactions) {
+  const txs = transactions || [];
+  const movementCount = txs.filter((tx) => Math.abs(Number(tx.amount) || 0) > 0.000001).length;
+  const balanceCount = txs.filter((tx) => Number.isFinite(tx.balance)).length;
+  const inflow = txs.filter((tx) => tx.amount > 0).reduce((sum, tx) => sum + tx.amount, 0);
+  const outflow = txs.filter((tx) => tx.amount < 0).reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+  return { movementCount, balanceCount, inflow, outflow };
+}
+
+function detectDominantMonthFromTransactions(transactions) {
+  const counts = new Map();
+
+  (transactions || []).forEach((tx) => {
+    const primaryMonth = toMonthKey(tx?.dateObj);
+    const altMonth = toMonthKey(tx?.altDateObj);
+
+    if (primaryMonth) {
+      counts.set(primaryMonth, (counts.get(primaryMonth) || 0) + 1);
+    }
+    if (altMonth && altMonth !== primaryMonth) {
+      counts.set(altMonth, (counts.get(altMonth) || 0) + 0.5);
+    }
+  });
+
+  if (counts.size === 0) return "";
+
+  return [...counts.entries()]
+    .sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return b[0].localeCompare(a[0]);
+    })[0][0];
+}
+
+function detectMonthKeyFromFileName(fileName) {
+  const raw = String(fileName || "");
+  const compactMatch = raw.match(/\b(20\d{2})(0[1-9]|1[0-2])\b/);
+  if (compactMatch) {
+    return `${compactMatch[1]}-${compactMatch[2]}`;
+  }
+
+  const separatedMatch = raw.match(/\b(20\d{2})[-_. ](0[1-9]|1[0-2])\b/);
+  if (separatedMatch) {
+    return `${separatedMatch[1]}-${separatedMatch[2]}`;
+  }
+
+  return "";
+}
+
+function parseStatementWithBestProfile(text, selectedProfile, selectedMonth = "", template = null) {
+  const profile = normalizeBankParserProfile(selectedProfile);
+  const profilesToTry =
+    profile === "auto" ? ["auto", "deutsche", "commerz", "sparkasse"] : [profile];
+
+  let best = null;
+  let lastError = null;
+
+  profilesToTry.forEach((candidateProfile) => {
+    try {
+      const parsed = parseBankStatementCsv(text, candidateProfile, { selectedMonth, template });
+      const movement = summarizeStatementMovement(parsed);
+      const score = parsed.length * 2 + movement.movementCount * 4 + movement.balanceCount;
+      if (!best || score > best.score) {
+        best = {
+          profile: candidateProfile,
+          profileLabel: BANK_PARSER_PROFILES.find((item) => item.value === candidateProfile)?.label || candidateProfile,
+          transactions: parsed,
+          score,
+        };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  });
+
+  if (!best) {
+    throw lastError || new Error("Не удалось распознать формат CSV выписки.");
+  }
+
+  return best;
+}
+
+function guessAccountIdForFolderItem(fileName, profile, legalEntityId = 0) {
+  const options = getFolderImportAccountOptions(legalEntityId);
+  if (options.length === 0) return 0;
+
+  const normalizedFileName = normalizeText(String(fileName || "").replace(/\.[^.]+$/, ""));
+  if (normalizedFileName) {
+    const byName = options.find((account) => normalizedFileName.includes(normalizeText(account.name)));
+    if (byName) return byName.id;
+  }
+
+  if (profile && profile !== "auto") {
+    const byProfile = options.filter((account) => normalizeBankParserProfile(account.parserProfile) === profile);
+    if (byProfile.length === 1) return byProfile[0].id;
+  }
+
+  return options.length === 1 ? options[0].id : 0;
+}
+
+async function analyzeBankFolderImportDraft() {
+  if (!requirePermission("banks.statement.upload", "Недостаточно прав: роль не позволяет загружать выписки.")) return;
+
+  const selectedLegalEntityId = Number(els.bankFolderEntitySelect?.value) || 0;
+  const selectedProfile = normalizeBankParserProfile(els.bankFolderParserProfile?.value || "auto");
+  const files = Array.from(els.bankFolderInput?.files || [])
+    .filter((file) => /\.csv$/i.test(String(file?.name || "")))
+    .sort((a, b) =>
+      String(a.webkitRelativePath || a.name || "").localeCompare(String(b.webkitRelativePath || b.name || ""), "ru")
+    );
+
+  if (files.length === 0) {
+    alert("Выберите хотя бы один CSV-файл или папку с CSV.");
+    return;
+  }
+
+  state.banksUi.folderImport.legalEntityId = selectedLegalEntityId;
+  state.banksUi.folderImport.parserProfile = selectedProfile;
+  state.banksUi.folderImport.statusText = `Анализ файлов: ${files.length}...`;
+  state.banksUi.folderImport.items = [];
+  renderBankFolderImportPreview();
+
+  const items = [];
+  for (const file of files) {
+    const visibleFileName = String(file.webkitRelativePath || file.name || "");
+    try {
+      const text = await readTextFileAsUtf8(file);
+      const preliminaryAccountId = guessAccountIdForFolderItem(file.name, selectedProfile, selectedLegalEntityId);
+      const preliminaryTemplate =
+        normalizeBankStatementTemplate(
+          state.banks.accounts.find((account) => account.id === preliminaryAccountId)?.statementTemplate
+        ) || createDefaultBankStatementTemplate();
+      const parsed = parseStatementWithBestProfile(text, selectedProfile, "", preliminaryTemplate);
+      const detectedMonth = detectDominantMonthFromTransactions(parsed.transactions) || detectMonthKeyFromFileName(visibleFileName);
+      const monthTransactions = detectedMonth ? extractTransactionsForMonth(parsed.transactions, detectedMonth) : [];
+      const movement = summarizeStatementMovement(monthTransactions);
+      const accountId = guessAccountIdForFolderItem(file.name, parsed.profile, selectedLegalEntityId);
+      const ready = Boolean(detectedMonth) && accountId > 0 && monthTransactions.length > 0;
+
+      items.push({
+        include: true,
+        fileName: visibleFileName,
+        originalFileName: String(file.name || ""),
+        parserProfile: parsed.profile,
+        profileLabel: parsed.profileLabel,
+        accountId,
+        month: detectedMonth,
+        transactions: parsed.transactions,
+        monthTransactions,
+        operationsCount: monthTransactions.length,
+        inflow: movement.inflow,
+        outflow: movement.outflow,
+        ready,
+        error: false,
+        status: ready
+          ? "Готово к сохранению"
+          : accountId <= 0
+            ? "Не удалось подобрать счет"
+            : "Не удалось определить месяц",
+      });
+    } catch (error) {
+      items.push({
+        include: false,
+        fileName: visibleFileName,
+        originalFileName: String(file.name || ""),
+        parserProfile: selectedProfile,
+        profileLabel: BANK_PARSER_PROFILES.find((item) => item.value === selectedProfile)?.label || selectedProfile,
+        accountId: 0,
+        month: "",
+        transactions: [],
+        monthTransactions: [],
+        operationsCount: 0,
+        inflow: 0,
+        outflow: 0,
+        ready: false,
+        error: true,
+        status: `Ошибка: ${error.message}`,
+      });
+    }
+  }
+
+  const readyCount = items.filter((item) => item.ready).length;
+  const errorCount = items.filter((item) => item.error).length;
+  state.banksUi.folderImport.items = items;
+  state.banksUi.folderImport.statusText = "";
+  if (readyCount === 0 && errorCount > 0) {
+    state.banksUi.folderImport.statusText = `Ошибки в файлах: ${errorCount}. Проверьте строки предпросмотра.`;
+  }
+  renderBankFolderImportPreview();
+}
+
+function clearBankFolderImportDraft() {
+  if (!requirePermission("banks.statement.upload", "Недостаточно прав: роль не позволяет менять черновик импорта.")) return;
+  state.banksUi.folderImport.items = [];
+  state.banksUi.folderImport.statusText = "Черновик импорта очищен.";
+  if (els.bankFolderInput) {
+    els.bankFolderInput.value = "";
+  }
+  renderBankFolderImportPreview();
+}
+
+function applyBankFolderImportDraft() {
+  if (!requirePermission("banks.statement.upload", "Недостаточно прав: роль не позволяет загружать выписки.")) return;
+
+  const selected = (state.banksUi.folderImport.items || []).filter((item) => item.include);
+  if (selected.length === 0) {
+    alert("Нет выбранных файлов для сохранения.");
+    return;
+  }
+
+  const ready = selected.filter((item) => item.ready && !item.error && item.accountId > 0 && item.month);
+  if (ready.length === 0) {
+    alert("Нет готовых строк для сохранения. Проверьте счет/месяц в предпросмотре.");
+    return;
+  }
+
+  const confirm = window.confirm(`Сохранить ${ready.length} выписок в банки?`);
+  if (!confirm) return;
+
+  let savedCount = 0;
+  let invalidCount = 0;
+  ready.forEach((item) => {
+    const monthTransactions = extractTransactionsForMonth(item.transactions, item.month);
+    const movement = summarizeStatementMovement(monthTransactions);
+    if (monthTransactions.length === 0 || (movement.movementCount === 0 && movement.balanceCount === 0)) {
+      invalidCount += 1;
+      return;
+    }
+
+    state.banks.accounts = state.banks.accounts.map((account) =>
+      account.id !== item.accountId
+        ? account
+        : upsertMonthlyStatement(account, item.month, {
+            fileName: item.originalFileName || item.fileName,
+            transactions: monthTransactions,
+          })
+    );
+
+    const accountName = state.banks.accounts.find((account) => account.id === item.accountId)?.name || `Счет ${item.accountId}`;
+    logChange(
+      "BANK_STATEMENT_UPLOADED",
+      "Банки",
+      `${accountName}; месяц ${item.month}; файл ${item.originalFileName || item.fileName}; операций ${monthTransactions.length}; пакетный импорт`
+    );
+    savedCount += 1;
+  });
+
+  if (savedCount === 0) {
+    alert("Ни один файл не сохранен: проверьте выбранные счета/месяцы и корректность выписок.");
+    renderBankFolderImportPreview();
+    return;
+  }
+
+  const skipped = selected.length - savedCount;
+  state.banksUi.folderImport.items = [];
+  state.banksUi.folderImport.statusText = `Импорт завершен. Сохранено: ${savedCount}. Пропущено: ${skipped}.`;
+  if (els.bankFolderInput) {
+    els.bankFolderInput.value = "";
+  }
+
+  if (invalidCount > 0) {
+    alert(`Часть строк пропущена (${invalidCount}) из-за отсутствия распознанных операций/остатков.`);
+  }
+  persistBanksAndRender();
+}
+
 function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "auto") {
   if (!requirePermission("banks.statement.upload", "Недостаточно прав: роль не позволяет загружать выписки.")) return;
+  const account = state.banks.accounts.find((item) => item.id === accountId);
+  const statementTemplate = normalizeBankStatementTemplate(account?.statementTemplate);
 
   const fileName = String(file?.name || "");
   const lowerName = fileName.toLowerCase();
@@ -2635,34 +3138,18 @@ function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "au
 
   reader.onload = () => {
     try {
-      const transactions = parseBankStatementCsv(String(reader.result || ""), parserProfile, { selectedMonth });
-      const monthTransactions = transactions
-        .filter((tx) => {
-          const primaryMonth = toMonthKey(tx.dateObj);
-          const altMonth = toMonthKey(tx.altDateObj);
-          return primaryMonth === selectedMonth || altMonth === selectedMonth;
-        })
-        .map((tx) => {
-          const primaryMonth = toMonthKey(tx.dateObj);
-          const altMonth = toMonthKey(tx.altDateObj);
-
-          if (primaryMonth !== selectedMonth && altMonth === selectedMonth && tx.altDateObj) {
-            return {
-              ...tx,
-              dateObj: tx.altDateObj,
-            };
-          }
-
-          return tx;
-        });
+      const transactions = parseBankStatementCsv(String(reader.result || ""), parserProfile, {
+        selectedMonth,
+        template: statementTemplate,
+      });
+      const monthTransactions = extractTransactionsForMonth(transactions, selectedMonth);
 
       if (monthTransactions.length === 0) {
         alert(`В файле нет операций за месяц ${selectedMonth}. Проверьте выбранный месяц.`);
         return;
       }
 
-      const movementCount = monthTransactions.filter((tx) => Math.abs(Number(tx.amount) || 0) > 0.000001).length;
-      const balanceCount = monthTransactions.filter((tx) => Number.isFinite(tx.balance)).length;
+      const { movementCount, balanceCount } = summarizeStatementMovement(monthTransactions);
       if (movementCount === 0 && balanceCount === 0) {
         alert(
           "Не удалось распознать суммы и остатки в выписке. Проверьте, что это именно CSV-экспорт (не .numbers), и попробуйте другой профиль банка."
@@ -2708,6 +3195,50 @@ function setBankParserProfile(accountId, parserProfile) {
     account.id === accountId ? { ...account, parserProfile: normalizedProfile } : account
   );
   logChange("BANK_PROFILE_CHANGED", "Банки", `${account.name}: профиль "${normalizedProfile}"`);
+  persistBanksAndRender();
+}
+
+function setBankStatementTemplate(accountId, rawTemplate) {
+  if (!requirePermission("banks.statement.profile", "Недостаточно прав: роль не позволяет менять шаблон банка.")) return;
+  const account = state.banks.accounts.find((item) => item.id === accountId);
+  if (!account) return;
+  const nextTemplate = normalizeBankStatementTemplate(rawTemplate);
+  const prevTemplate = normalizeBankStatementTemplate(account.statementTemplate);
+  const hasChanges =
+    JSON.stringify(prevTemplate) !== JSON.stringify(nextTemplate);
+  if (!hasChanges) return;
+
+  state.banks.accounts = state.banks.accounts.map((item) =>
+    item.id === accountId ? { ...item, statementTemplate: nextTemplate } : item
+  );
+
+  const brief = [
+    nextTemplate.delimiter !== "auto"
+      ? `разделитель=${nextTemplate.delimiter === "tab" ? "TAB" : nextTemplate.delimiter}`
+      : "",
+    nextTemplate.date ? `дата=${nextTemplate.date}` : "",
+    nextTemplate.amount ? `сумма=${nextTemplate.amount}` : "",
+    nextTemplate.debit ? `дебет=${nextTemplate.debit}` : "",
+    nextTemplate.credit ? `кредит=${nextTemplate.credit}` : "",
+    nextTemplate.balance ? `остаток=${nextTemplate.balance}` : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  logChange("BANK_TEMPLATE_SAVED", "Банки", `${account.name}: шаблон обновлен${brief ? ` (${brief})` : ""}`);
+  persistBanksAndRender();
+}
+
+function resetBankStatementTemplate(accountId) {
+  if (!requirePermission("banks.statement.profile", "Недостаточно прав: роль не позволяет менять шаблон банка.")) return;
+  const account = state.banks.accounts.find((item) => item.id === accountId);
+  if (!account) return;
+  const confirmed = window.confirm(`Сбросить шаблон колонок у счета "${account.name}"?`);
+  if (!confirmed) return;
+
+  state.banks.accounts = state.banks.accounts.map((item) =>
+    item.id === accountId ? { ...item, statementTemplate: createDefaultBankStatementTemplate() } : item
+  );
+  logChange("BANK_TEMPLATE_RESET", "Банки", `${account.name}: шаблон сброшен`);
   persistBanksAndRender();
 }
 
@@ -2945,20 +3476,21 @@ function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
   const cleanText = text.replace(/^\uFEFF/, "").trim();
   if (!cleanText) throw new Error("CSV выписки пустой.");
 
+  const template = normalizeBankStatementTemplate(options.template);
   const profile = getBankStatementProfile(parserProfile);
-  const csvCandidate = parseCsvWithBestDelimiter(cleanText, profile);
+  const csvCandidate = parseCsvWithBestDelimiter(cleanText, profile, template.delimiter);
   const rows = csvCandidate.rows;
   const monthHint = getMonthHintFromSelectedMonth(options.selectedMonth);
 
   if (rows.length < 2) throw new Error("В выписке нет данных.");
 
-  const dateCandidates = profile.dateCandidates;
-  const altDateCandidates = profile.altDateCandidates;
-  const amountCandidates = profile.amountCandidates;
-  const debitCandidates = profile.debitCandidates;
-  const creditCandidates = profile.creditCandidates;
-  const signCandidates = profile.signCandidates;
-  const balanceCandidates = profile.balanceCandidates;
+  const dateCandidates = buildColumnCandidates(template.date, profile.dateCandidates);
+  const altDateCandidates = buildColumnCandidates(template.altDate, profile.altDateCandidates);
+  const amountCandidates = buildColumnCandidates(template.amount, profile.amountCandidates);
+  const debitCandidates = buildColumnCandidates(template.debit, profile.debitCandidates);
+  const creditCandidates = buildColumnCandidates(template.credit, profile.creditCandidates);
+  const signCandidates = buildColumnCandidates(template.sign, profile.signCandidates);
+  const balanceCandidates = buildColumnCandidates(template.balance, profile.balanceCandidates);
   const {
     headerRowIndex,
     idxDate,
@@ -3071,6 +3603,21 @@ function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
   return parsedRows;
 }
 
+function buildColumnCandidates(primary, fallbackList) {
+  const list = [];
+  const primaryValue = String(primary || "").trim();
+  if (primaryValue) {
+    list.push(primaryValue);
+  }
+  (fallbackList || []).forEach((item) => {
+    const value = String(item || "").trim();
+    if (value) {
+      list.push(value);
+    }
+  });
+  return uniqueValues(list);
+}
+
 function summarizeBankTransactions(transactions, manualOpeningBalances = {}) {
   if (!transactions || transactions.length === 0) {
     return null;
@@ -3110,9 +3657,14 @@ function summarizeBankTransactions(transactions, manualOpeningBalances = {}) {
 
 function renderBanksTab() {
   refreshBankEntitySelect();
+  refreshBankFolderEntitySelect();
   els.banksSearch.value = state.banksUi.search;
   els.banksStatusFilter.value = state.banksUi.status;
   els.banksDataFilter.value = state.banksUi.data;
+  if (els.bankFolderParserProfile) {
+    els.bankFolderParserProfile.value = state.banksUi.folderImport.parserProfile || "auto";
+  }
+  renderBankFolderImportPreview();
 
   const entitySummaries = state.banks.legalEntities.map((entity) => {
     const accounts = state.banks.accounts.filter((account) => account.legalEntityId === entity.id);
@@ -3166,6 +3718,13 @@ function renderBanksEntityBlocks(entitySummaries, visibleAccountIds) {
           const parserProfile = BANK_PARSER_PROFILES.some((item) => item.value === account.parserProfile)
             ? account.parserProfile
             : "auto";
+          const statementTemplate = normalizeBankStatementTemplate(account.statementTemplate);
+          const delimiterOptions = BANK_TEMPLATE_DELIMITERS.map(
+            (item) =>
+              `<option value="${escapeHtml(item.value)}" ${
+                item.value === statementTemplate.delimiter ? "selected" : ""
+              }>${escapeHtml(item.label)}</option>`
+          ).join("");
           const defaultManualOpeningMonth = getDefaultManualOpeningMonth(account);
           const manualOpeningValue = getManualOpeningBalance(account, defaultManualOpeningMonth);
           const parserOptions = BANK_PARSER_PROFILES.map(
@@ -3240,6 +3799,110 @@ function renderBanksEntityBlocks(entitySummaries, visibleAccountIds) {
                   </select>
                   <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" ${isDeleted || !canUploadStatement ? "disabled" : ""} />
                   <span class="bank-status">${status}</span>
+                </div>
+                <div class="bank-template-editor">
+                  <details>
+                    <summary>Шаблон CSV банка (профиль и маппинг колонок)</summary>
+                    <div class="bank-template-grid">
+                      <label>
+                        Разделитель
+                        <select data-bank-template-delimiter data-account-id="${account.id}" ${
+                          isDeleted || !canChangeProfile ? "disabled" : ""
+                        }>
+                          ${delimiterOptions}
+                        </select>
+                      </label>
+                      <label>
+                        Колонка даты
+                        <input
+                          type="text"
+                          data-bank-template-date
+                          data-account-id="${account.id}"
+                          placeholder="Buchungstag"
+                          value="${escapeHtml(statementTemplate.date || "")}"
+                          ${isDeleted || !canChangeProfile ? "disabled" : ""}
+                        />
+                      </label>
+                      <label>
+                        Колонка даты (альт.)
+                        <input
+                          type="text"
+                          data-bank-template-alt-date
+                          data-account-id="${account.id}"
+                          placeholder="Wertstellung"
+                          value="${escapeHtml(statementTemplate.altDate || "")}"
+                          ${isDeleted || !canChangeProfile ? "disabled" : ""}
+                        />
+                      </label>
+                      <label>
+                        Колонка суммы
+                        <input
+                          type="text"
+                          data-bank-template-amount
+                          data-account-id="${account.id}"
+                          placeholder="Betrag/Umsatz"
+                          value="${escapeHtml(statementTemplate.amount || "")}"
+                          ${isDeleted || !canChangeProfile ? "disabled" : ""}
+                        />
+                      </label>
+                      <label>
+                        Колонка дебета
+                        <input
+                          type="text"
+                          data-bank-template-debit
+                          data-account-id="${account.id}"
+                          placeholder="Soll"
+                          value="${escapeHtml(statementTemplate.debit || "")}"
+                          ${isDeleted || !canChangeProfile ? "disabled" : ""}
+                        />
+                      </label>
+                      <label>
+                        Колонка кредита
+                        <input
+                          type="text"
+                          data-bank-template-credit
+                          data-account-id="${account.id}"
+                          placeholder="Haben"
+                          value="${escapeHtml(statementTemplate.credit || "")}"
+                          ${isDeleted || !canChangeProfile ? "disabled" : ""}
+                        />
+                      </label>
+                      <label>
+                        Колонка знака
+                        <input
+                          type="text"
+                          data-bank-template-sign
+                          data-account-id="${account.id}"
+                          placeholder="S/H"
+                          value="${escapeHtml(statementTemplate.sign || "")}"
+                          ${isDeleted || !canChangeProfile ? "disabled" : ""}
+                        />
+                      </label>
+                      <label>
+                        Колонка остатка
+                        <input
+                          type="text"
+                          data-bank-template-balance
+                          data-account-id="${account.id}"
+                          placeholder="Saldo/Kontostand"
+                          value="${escapeHtml(statementTemplate.balance || "")}"
+                          ${isDeleted || !canChangeProfile ? "disabled" : ""}
+                        />
+                      </label>
+                      <div class="bank-template-actions">
+                        <button type="button" class="secondary" data-bank-action="save-template" data-account-id="${account.id}" ${
+                          isDeleted || !canChangeProfile ? "disabled" : ""
+                        }>
+                          Сохранить шаблон
+                        </button>
+                        <button type="button" class="secondary" data-bank-action="reset-template" data-account-id="${account.id}" ${
+                          isDeleted || !canChangeProfile ? "disabled" : ""
+                        }>
+                          Сбросить
+                        </button>
+                      </div>
+                    </div>
+                  </details>
                 </div>
                 <div class="bank-manual-opening">
                   <span class="bank-status">Ручной остаток на начало месяца</span>
@@ -3582,6 +4245,7 @@ function persistBanksAndRender() {
 }
 
 function refreshBankEntitySelect() {
+  if (!els.bankAccountEntitySelect) return;
   const selected = Number(els.bankAccountEntitySelect.value) || state.banks.legalEntities[0]?.id || 0;
 
   els.bankAccountEntitySelect.innerHTML = state.banks.legalEntities
@@ -3599,6 +4263,102 @@ function refreshBankEntitySelect() {
   } else {
     els.bankAccountEntitySelect.selectedIndex = 0;
   }
+}
+
+function refreshBankFolderEntitySelect() {
+  if (!els.bankFolderEntitySelect) return;
+
+  const current = Number(state.banksUi.folderImport.legalEntityId) || Number(els.bankFolderEntitySelect.value) || 0;
+  const options = ['<option value="0">Все юрлица</option>'].concat(
+    state.banks.legalEntities.map((entity) => `<option value="${entity.id}">${escapeHtml(entity.name)}</option>`)
+  );
+  els.bankFolderEntitySelect.innerHTML = options.join("");
+
+  const exists = [...els.bankFolderEntitySelect.options].some((option) => Number(option.value) === current);
+  const nextValue = exists ? current : 0;
+  els.bankFolderEntitySelect.value = String(nextValue);
+  state.banksUi.folderImport.legalEntityId = nextValue;
+}
+
+function getFolderImportAccountOptions(legalEntityId = 0) {
+  const accounts = (state.banks.accounts || []).filter((account) => {
+    if (account.status === "DELETED") return false;
+    if (Number(legalEntityId) > 0 && Number(account.legalEntityId) !== Number(legalEntityId)) return false;
+    return true;
+  });
+  return accounts.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ru"));
+}
+
+function renderBankFolderImportPreview() {
+  if (!els.bankFolderPreviewBody || !els.bankFolderStatus) return;
+
+  const items = state.banksUi.folderImport.items || [];
+  const selectedEntityId = Number(state.banksUi.folderImport.legalEntityId) || 0;
+  const availableAccounts = getFolderImportAccountOptions(selectedEntityId);
+  const canUploadStatement = hasPermission("banks.statement.upload");
+
+  if (!items.length) {
+    els.bankFolderPreviewBody.innerHTML = `<tr><td colspan="9" class="empty">Добавьте файлы и нажмите "Собрать предпросмотр".</td></tr>`;
+    els.bankFolderStatus.textContent = state.banksUi.folderImport.statusText || "Выберите папку/несколько CSV для предпросмотра.";
+    els.bankFolderStatus.className = "status";
+    setElementDisabled(els.bankFolderApplyBtn, !canUploadStatement);
+    return;
+  }
+
+  const readyCount = items.filter((item) => item.ready && item.include).length;
+  const errorCount = items.filter((item) => item.error).length;
+  const skippedCount = items.filter((item) => !item.include).length;
+  const dynamicStatus = `Файлов: ${items.length}. Готово: ${readyCount}. Ошибок: ${errorCount}. Исключено: ${skippedCount}.`;
+  const rawStatusText = String(state.banksUi.folderImport.statusText || "");
+  const showRawStatus = rawStatusText.startsWith("Анализ файлов:") || rawStatusText.startsWith("Ошибки в файлах:");
+  els.bankFolderStatus.textContent = showRawStatus ? rawStatusText : dynamicStatus;
+  els.bankFolderStatus.className = `status bank-folder-status ${
+    errorCount > 0 ? "warn" : readyCount > 0 ? "ready" : "warn"
+  }`;
+  setElementDisabled(els.bankFolderApplyBtn, !canUploadStatement || readyCount === 0);
+
+  els.bankFolderPreviewBody.innerHTML = items
+    .map((item, index) => {
+      const accountExists = availableAccounts.some((account) => Number(account.id) === Number(item.accountId));
+      const safeAccountId = accountExists ? Number(item.accountId) : 0;
+      if (!accountExists && item.accountId) {
+        item.accountId = 0;
+        item.ready = false;
+        item.status = "Требуется выбрать счет";
+      }
+
+      const accountOptions = [`<option value="0">Выберите счет</option>`]
+        .concat(
+          availableAccounts.map(
+            (account) =>
+              `<option value="${account.id}" ${Number(account.id) === safeAccountId ? "selected" : ""}>${escapeHtml(
+                account.name
+              )}</option>`
+          )
+        )
+        .join("");
+
+      const rowClass = item.error ? "unresolved-row" : "";
+      return `
+        <tr class="${rowClass}" data-folder-row="${index}">
+          <td><input type="checkbox" data-folder-include ${item.include ? "checked" : ""} ${canUploadStatement ? "" : "disabled"} /></td>
+          <td>${escapeHtml(item.fileName || "")}</td>
+          <td>${escapeHtml(item.profileLabel || "")}</td>
+          <td>
+            <select data-folder-account-id ${canUploadStatement ? "" : "disabled"}>
+              ${accountOptions}
+            </select>
+          </td>
+          <td>
+            <input type="month" data-folder-month value="${escapeHtml(item.month || "")}" ${canUploadStatement ? "" : "disabled"} />
+          </td>
+          <td>${item.operationsCount || 0}</td>
+          <td class="cell-number">${formatMoney(item.inflow || 0)}</td>
+          <td class="cell-number">${formatMoney(item.outflow || 0)}</td>
+          <td>${escapeHtml(item.status || (item.ready ? "Готово" : "Проверьте настройки"))}</td>
+        </tr>`;
+    })
+    .join("");
 }
 
 function bindReconcileEvents() {
@@ -3774,6 +4534,7 @@ function renderReport() {
   renderMonthTable(monthRows);
   renderAnalyticsTab();
   renderReconcileTable();
+  persistRuntimeState();
 }
 
 function getFilteredOperations() {
@@ -4025,6 +4786,7 @@ function renderReconcileTable() {
 
   const unresolvedTotal = operations.filter((op) => op.unresolved).length;
   els.reconcileStatus.textContent = `Операций: ${operations.length}. Неразнесенных: ${unresolvedTotal}.${canAssign ? "" : " Режим только просмотра."}`;
+  persistRuntimeState();
 
   if (rows.length === 0) {
     els.reconcileTableBody.innerHTML = `<tr><td colspan="8" class="empty">Нет строк для отображения.</td></tr>`;
@@ -4422,6 +5184,163 @@ function downloadReportCsv() {
   triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), "dds-report.csv");
 }
 
+function downloadManagementPackageCsv() {
+  if (!requirePermission("report.export", "Недостаточно прав: роль не позволяет выгружать управленческий пакет.")) return;
+
+  const filteredOperations = getFilteredOperations();
+  const { reportRows, totalsByActivity, grandTotals } = aggregateByArticle(filteredOperations);
+  const unresolvedRows = getOperationsForReconcile().filter((op) => op.unresolved);
+  const activityRows = [
+    { label: "01 Операционная деятельность", prefix: "01 " },
+    { label: "02 Инвестиционная деятельность", prefix: "02 " },
+    { label: "03 Финансовая деятельность", prefix: "03 " },
+  ];
+  const shortRows = activityRows.map((item) => ({
+    label: item.label,
+    ...summarizeTotalsByActivityPrefix(totalsByActivity, item.prefix),
+  }));
+  const entityById = new Map((state.banks.legalEntities || []).map((entity) => [entity.id, entity.name]));
+  const entityRows = (state.banks.legalEntities || []).map((entity) => {
+    const activeAccounts = (state.banks.accounts || []).filter(
+      (account) => Number(account.legalEntityId) === Number(entity.id) && account.status !== "DELETED"
+    );
+    return {
+      entity: entity.name,
+      summary: summarizeEntity(activeAccounts),
+    };
+  });
+  const accountRows = (state.banks.accounts || [])
+    .filter((account) => account.status !== "DELETED")
+    .map((account) => ({
+      entity: entityById.get(account.legalEntityId) || "Без юрлица",
+      account: account.name,
+      summary: account.summary || null,
+    }))
+    .sort((a, b) => `${a.entity} ${a.account}`.localeCompare(`${b.entity} ${b.account}`, "ru"));
+  const from = els.dateFromInput?.value || "";
+  const to = els.dateToInput?.value || "";
+  const reportGeneratedAt = formatDateTime(new Date().toISOString());
+
+  const lines = [];
+  lines.push(["Раздел", "Показатель", "Значение 1", "Значение 2", "Значение 3", "Значение 4", "Значение 5"]);
+  lines.push(["Метаданные", "Сформировано", reportGeneratedAt, "", "", "", ""]);
+  lines.push(["Метаданные", "Период отчета", `${from || "н/д"} - ${to || "н/д"}`, "", "", "", ""]);
+  lines.push(["Метаданные", "Операций в выборке", String(filteredOperations.length), "", "", "", ""]);
+  lines.push(["", "", "", "", "", "", ""]);
+
+  lines.push(["Короткий ДДС", "Вид деятельности", "Поступления", "Выбытия", "Чистый поток", "", ""]);
+  shortRows.forEach((row) => {
+    lines.push([
+      "Короткий ДДС",
+      row.label,
+      formatNumberForCsv(row.inAmount),
+      formatNumberForCsv(row.outAmount),
+      formatNumberForCsv(row.net),
+      "",
+      "",
+    ]);
+  });
+  lines.push([
+    "Короткий ДДС",
+    "Итого по ДДС",
+    formatNumberForCsv(grandTotals.inAmount),
+    formatNumberForCsv(grandTotals.outAmount),
+    formatNumberForCsv(grandTotals.net),
+    "",
+    "",
+  ]);
+  lines.push(["", "", "", "", "", "", ""]);
+
+  lines.push(["Детальный ДДС", "Вид деятельности", "Статья ДДС", "Поступления", "Выбытия", "Чистый поток", "Операций"]);
+  reportRows.forEach((row) => {
+    lines.push([
+      "Детальный ДДС",
+      row.activity,
+      row.article,
+      formatNumberForCsv(row.inAmount),
+      formatNumberForCsv(row.outAmount),
+      formatNumberForCsv(row.net),
+      String(row.count),
+    ]);
+  });
+  lines.push(["", "", "", "", "", "", ""]);
+
+  lines.push([
+    "Сводка по юрлицам",
+    "Юрлицо",
+    "Начало месяца",
+    "Конец месяца",
+    "Остаток на последнюю дату",
+    "Поступления",
+    "Выбытия",
+  ]);
+  entityRows.forEach((row) => {
+    const summary = row.summary;
+    lines.push([
+      "Сводка по юрлицам",
+      row.entity,
+      formatNumberForCsv(summary?.openingBalance),
+      formatNumberForCsv(summary?.monthEndBalance),
+      formatNumberForCsv(summary?.latestBalance),
+      formatNumberForCsv(summary?.inflow || 0),
+      formatNumberForCsv(summary?.outflow || 0),
+    ]);
+  });
+  lines.push(["", "", "", "", "", "", ""]);
+
+  lines.push([
+    "Сводка по банкам",
+    "Юрлицо",
+    "Счет",
+    "Начало месяца",
+    "Конец месяца",
+    "Поступления",
+    "Выбытия",
+  ]);
+  accountRows.forEach((row) => {
+    lines.push([
+      "Сводка по банкам",
+      row.entity,
+      row.account,
+      formatNumberForCsv(row.summary?.openingBalance),
+      formatNumberForCsv(row.summary?.monthEndBalance),
+      formatNumberForCsv(row.summary?.inflow || 0),
+      formatNumberForCsv(row.summary?.outflow || 0),
+    ]);
+  });
+  lines.push(["", "", "", "", "", "", ""]);
+
+  lines.push([
+    "Неразнесенные платежи",
+    "Дата",
+    "Контрагент",
+    "Комментарий",
+    "Статья из файла",
+    "Сумма",
+    "Группа",
+  ]);
+  unresolvedRows.forEach((op) => {
+    lines.push([
+      "Неразнесенные платежи",
+      toDateInputValue(op.dateObj),
+      op.counterparty || "",
+      op.comment || "",
+      op.articleInput || "",
+      formatNumberForCsv(op.direction === "Выбытие" ? -op.amount : op.amount),
+      op.direction,
+    ]);
+  });
+
+  const csv = lines
+    .map((line) => line.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(";"))
+    .join("\n");
+  triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), "dds-management-package.csv");
+  logChange("MANAGEMENT_PACKAGE_EXPORTED", "Сервис", `Экспортирован пакет: операций ${filteredOperations.length}, неразнесенных ${unresolvedRows.length}`);
+  if (els.serviceStatus) {
+    els.serviceStatus.textContent = `Управленческий пакет выгружен: ${reportGeneratedAt}.`;
+  }
+}
+
 function downloadArticlesCsv() {
   if (!requirePermission("articles.export", "Недостаточно прав: роль не позволяет выгружать справочник статей.")) return;
   const headers = [
@@ -4591,6 +5510,299 @@ function triggerDownload(blob, fileName) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function exportAppBackupFile() {
+  if (!requirePermission("access.users.manage", "Недостаточно прав: только Админ может экспортировать полный бэкап.")) return;
+  const payload = {
+    format: "dds-mvp-backup",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    appTitle: "DDS MVP",
+    data: {
+      articles: state.articles,
+      banks: state.banks,
+      plan: state.plan,
+      analytics: { ...state.analytics, latest: null },
+      access: state.access,
+      changeLog: state.changeLog,
+      runtime: buildRuntimeSnapshot(),
+    },
+  };
+  const json = JSON.stringify(payload, null, 2);
+  triggerDownload(new Blob([json], { type: "application/json;charset=utf-8;" }), "dds-backup.json");
+  logChange("BACKUP_EXPORTED", "Сервис", "Экспортирован полный бэкап приложения");
+  if (els.serviceStatus) {
+    els.serviceStatus.textContent = `Бэкап экспортирован: ${formatDateTime(payload.exportedAt)}.`;
+  }
+}
+
+async function importAppBackupFile() {
+  if (!requirePermission("access.users.manage", "Недостаточно прав: только Админ может восстанавливать бэкап.")) return;
+  const [file] = els.importBackupFile?.files || [];
+  if (!file) {
+    alert("Выберите JSON-файл бэкапа.");
+    return;
+  }
+
+  try {
+    const rawText = await readTextFileAsUtf8(file);
+    const parsed = JSON.parse(rawText);
+    const data =
+      parsed && typeof parsed === "object" && parsed.data && typeof parsed.data === "object" ? parsed.data : parsed;
+
+    if (!data || typeof data !== "object") {
+      throw new Error("В файле отсутствует блок данных.");
+    }
+
+    const firstConfirm = window.confirm(
+      "Восстановить состояние из бэкапа? Текущие данные приложения будут заменены."
+    );
+    if (!firstConfirm) return;
+
+    const phrase = window.prompt("Для подтверждения введите: ВОССТАНОВИТЬ БЭКАП");
+    if (phrase !== "ВОССТАНОВИТЬ БЭКАП") {
+      alert("Восстановление отменено: подтверждение не совпало.");
+      return;
+    }
+
+    applyBackupPayload(data);
+    logChange("BACKUP_RESTORED", "Сервис", `Восстановление из файла ${file.name}`);
+    if (els.importBackupFile) {
+      els.importBackupFile.value = "";
+    }
+    if (els.serviceStatus) {
+      els.serviceStatus.textContent = `Бэкап восстановлен из файла ${file.name}.`;
+    }
+  } catch (error) {
+    alert(`Ошибка восстановления: ${error.message || "неизвестная ошибка"}`);
+  }
+}
+
+function applyBackupPayload(data) {
+  const fallbackArticles = parseRawArticles(RAW_ARTICLES);
+  const fallbackBanks = { legalEntities: [], accounts: [] };
+  const fallbackRuntime = createDefaultRuntimeState();
+
+  state.articles =
+    Array.isArray(data.articles) && data.articles.length > 0
+      ? data.articles.map((row, index) => normalizeArticle(row, index))
+      : fallbackArticles;
+  state.banks = normalizeBanksState(data.banks, fallbackBanks);
+  state.plan = normalizePlanState(data.plan, createDefaultPlanState());
+  state.analytics = normalizeAnalyticsState(data.analytics, createDefaultAnalyticsState());
+  state.access = normalizeAccessStatePayload(data.access);
+  state.changeLog = normalizeChangeLogPayload(data.changeLog);
+  const runtimeSource =
+    data.runtime && typeof data.runtime === "object"
+      ? data.runtime
+      : {
+          operationsRaw: data.operationsRaw,
+          manualAssignments: data.manualAssignments,
+          reportFilters: data.reportFilters,
+        };
+  const restoredRuntime = normalizeRuntimeStatePayload(runtimeSource, fallbackRuntime);
+  state.operationsRaw = restoredRuntime.operationsRaw;
+  state.manualAssignments = restoredRuntime.manualAssignments;
+  state.analytics.latest = null;
+  state.planUi.editingIndex = -1;
+
+  saveArticles(state.articles);
+  saveBanksState(state.banks);
+  savePlanState(state.plan);
+  saveAnalyticsState(state.analytics);
+  saveAccessState(state.access);
+  saveChangeLog(state.changeLog);
+  saveRuntimeState(restoredRuntime);
+
+  cleanupLegacyPlaceholderEntities(true);
+  refreshAccessUserOptions(state.access.currentUser);
+  if (els.accessRoleSelect) {
+    els.accessRoleSelect.value = state.access.currentRole;
+  }
+  refreshBankEntitySelect();
+  refreshArticleFilterOptions();
+  refreshReportActivityOptions();
+  applyRuntimeStateToControls(restoredRuntime);
+  if (els.fileStatus) {
+    els.fileStatus.textContent =
+      restoredRuntime.operationsRaw.length > 0
+        ? `Восстановлено операций из бэкапа: ${restoredRuntime.operationsRaw.length}.`
+        : "Файл не загружен.";
+  }
+  renderBanksTab();
+  renderArticlesTable();
+  renderReport();
+  renderPlanTab();
+  renderAnalyticsTab();
+  renderReconcileTable();
+  renderChangeLog();
+  applyRoleAccess();
+}
+
+function buildRuntimeSnapshot() {
+  return {
+    operationsRaw: serializeOperationsForStorage(state.operationsRaw),
+    manualAssignments: { ...(state.manualAssignments || {}) },
+    reportFilters: {
+      dateFrom: String(els.dateFromInput?.value || ""),
+      dateTo: String(els.dateToInput?.value || ""),
+      activity: String(els.activityFilter?.value || "all"),
+      unresolvedOnly: Boolean(els.unresolvedOnly?.checked),
+    },
+  };
+}
+
+function persistRuntimeState() {
+  saveRuntimeState(buildRuntimeSnapshot());
+}
+
+function createDefaultRuntimeState() {
+  return {
+    operationsRaw: [],
+    manualAssignments: {},
+    reportFilters: {
+      dateFrom: "",
+      dateTo: "",
+      activity: "all",
+      unresolvedOnly: true,
+    },
+  };
+}
+
+function applyRuntimeStateToControls(runtimeStateRaw) {
+  const runtimeStateSafe = normalizeRuntimeStatePayload(runtimeStateRaw, createDefaultRuntimeState());
+  if (els.dateFromInput) els.dateFromInput.value = runtimeStateSafe.reportFilters.dateFrom;
+  if (els.dateToInput) els.dateToInput.value = runtimeStateSafe.reportFilters.dateTo;
+  if (els.activityFilter) {
+    const desired = runtimeStateSafe.reportFilters.activity || "all";
+    const exists = [...els.activityFilter.options].some((option) => option.value === desired);
+    els.activityFilter.value = exists ? desired : "all";
+  }
+  if (els.unresolvedOnly) {
+    els.unresolvedOnly.checked = Boolean(runtimeStateSafe.reportFilters.unresolvedOnly);
+  }
+}
+
+function loadRuntimeState() {
+  const fallback = createDefaultRuntimeState();
+  try {
+    const raw = localStorage.getItem(STORAGE_RUNTIME_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return normalizeRuntimeStatePayload(parsed, fallback);
+  } catch (error) {
+    console.warn("Cannot load runtime state from localStorage", error);
+    return fallback;
+  }
+}
+
+function saveRuntimeState(runtimeState) {
+  try {
+    localStorage.setItem(STORAGE_RUNTIME_KEY, JSON.stringify(runtimeState));
+  } catch (error) {
+    console.warn("Cannot save runtime state to localStorage", error);
+  }
+}
+
+function normalizeRuntimeStatePayload(rawState, fallback) {
+  if (!rawState || typeof rawState !== "object") return fallback;
+  const operationsRaw = normalizeOperationsRowsFromStorage(rawState.operationsRaw);
+  const manualAssignments = normalizeManualAssignmentsPayload(rawState.manualAssignments, operationsRaw);
+  const rawFilters = rawState.reportFilters && typeof rawState.reportFilters === "object" ? rawState.reportFilters : {};
+  const reportFilters = {
+    dateFrom: parseFlexibleDate(rawFilters.dateFrom || "")
+      ? toDateInputValue(parseFlexibleDate(rawFilters.dateFrom || ""))
+      : "",
+    dateTo: parseFlexibleDate(rawFilters.dateTo || "")
+      ? toDateInputValue(parseFlexibleDate(rawFilters.dateTo || ""))
+      : "",
+    activity: String(rawFilters.activity || "all"),
+    unresolvedOnly: rawFilters.unresolvedOnly === undefined ? true : Boolean(rawFilters.unresolvedOnly),
+  };
+  return {
+    operationsRaw,
+    manualAssignments,
+    reportFilters,
+  };
+}
+
+function serializeOperationsForStorage(operations) {
+  if (!Array.isArray(operations)) return [];
+  return operations.map((row) => ({
+    rowId: Number(row?.rowId) || 0,
+    dateRaw: String(row?.dateRaw || toDateInputValue(row?.dateObj) || ""),
+    counterparty: String(row?.counterparty || ""),
+    comment: String(row?.comment || ""),
+    articleInput: String(row?.articleInput || ""),
+    amount: Number(row?.amount) || 0,
+    direction: String(row?.direction || ""),
+  }));
+}
+
+function normalizeOperationsRowsFromStorage(rawRows) {
+  if (!Array.isArray(rawRows)) return [];
+  return rawRows
+    .map((row, index) => {
+      const dateSource = row?.dateRaw || row?.dateObj || "";
+      const dateObj = parseFlexibleDate(dateSource);
+      const amount = Number(row?.amount);
+      if (!dateObj || !Number.isFinite(amount)) return null;
+      const directionRaw = String(row?.direction || "");
+      const direction = directionRaw === "Выбытие" || directionRaw === "Поступление" ? directionRaw : amount < 0 ? "Выбытие" : "Поступление";
+      return {
+        rowId: Number(row?.rowId) || index + 2,
+        dateRaw: String(row?.dateRaw || toDateInputValue(dateObj)),
+        dateObj,
+        counterparty: String(row?.counterparty || ""),
+        comment: String(row?.comment || ""),
+        articleInput: String(row?.articleInput || ""),
+        amount: Math.abs(amount),
+        direction,
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeManualAssignmentsPayload(rawAssignments, operationsRaw) {
+  const allowedIds = new Set((operationsRaw || []).map((row) => Number(row.rowId)));
+  if (!rawAssignments || typeof rawAssignments !== "object") return {};
+  return Object.entries(rawAssignments).reduce((acc, [rowIdRaw, articleName]) => {
+    const rowId = Number(rowIdRaw);
+    const name = String(articleName || "").trim();
+    if (!Number.isFinite(rowId) || !allowedIds.has(rowId) || !name) return acc;
+    acc[rowId] = name;
+    return acc;
+  }, {});
+}
+
+function normalizeAccessStatePayload(rawAccess) {
+  const fallback = { currentRole: "ADMIN", currentUser: "Не указан", users: ["Не указан"] };
+  if (!rawAccess || typeof rawAccess !== "object") return fallback;
+  const role = String(rawAccess.currentRole || "").trim().toUpperCase();
+  const user = normalizeUserName(rawAccess.currentUser || fallback.currentUser);
+  const users = normalizeUsersList(rawAccess.users, user);
+  return {
+    currentRole: ROLE_CONFIG[role] ? role : fallback.currentRole,
+    currentUser: users.find((name) => normalizeText(name) === normalizeText(user)) || users[0],
+    users,
+  };
+}
+
+function normalizeChangeLogPayload(rawLog) {
+  if (!Array.isArray(rawLog)) return [];
+  return rawLog
+    .map((row, idx) => ({
+      id: Number(row?.id) || idx + 1,
+      timestamp: String(row?.timestamp || ""),
+      user: normalizeUserName(row?.user),
+      role: ROLE_CONFIG[String(row?.role || "").toUpperCase()] ? String(row.role).toUpperCase() : "VIEWER",
+      action: String(row?.action || "").trim(),
+      entity: String(row?.entity || "").trim(),
+      details: String(row?.details || "").trim(),
+    }))
+    .filter((row) => row.action && row.entity)
+    .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
 }
 
 function parseRawArticles(raw) {
@@ -5155,6 +6367,7 @@ function normalizeBankAccount(account, idx) {
     parserProfile: BANK_PARSER_PROFILES.some((item) => item.value === account?.parserProfile)
       ? account.parserProfile
       : "auto",
+    statementTemplate: normalizeBankStatementTemplate(account?.statementTemplate),
     status: account?.status === "DELETED" ? "DELETED" : "ACTIVE",
     fileName: String(account?.fileName || ""),
     manualOpeningBalances,
@@ -5409,9 +6622,10 @@ function findAmountColumn(headers, candidates, sampleRows = []) {
   return betragIdx;
 }
 
-function parseCsvWithBestDelimiter(text, profile) {
+function parseCsvWithBestDelimiter(text, profile, forcedDelimiter = "auto") {
   const preferred = detectCsvDelimiter(text);
-  const delimiters = [...new Set([preferred, ";", "\t", ","])];
+  const normalizedForced = templateDelimiterToChar(forcedDelimiter);
+  const delimiters = [...new Set([normalizedForced !== "auto" ? normalizedForced : preferred, preferred, ";", "\t", ","])];
 
   let best = null;
 
@@ -5439,6 +6653,9 @@ function parseCsvWithBestDelimiter(text, profile) {
     if (headerInfo.headerRowIndex === -1) score -= 120;
     if (maxCols < 3) score -= 120;
     if (delimiter === ",") score -= 8; // German bank exports almost always ";" or TAB
+    if (normalizedForced !== "auto" && delimiter === normalizedForced) {
+      score += 20;
+    }
 
     if (!best || score > best.score) {
       best = {
@@ -5453,7 +6670,7 @@ function parseCsvWithBestDelimiter(text, profile) {
 
   if (best) return best;
 
-  const fallbackDelimiter = preferred || ";";
+  const fallbackDelimiter = normalizedForced !== "auto" ? normalizedForced : preferred || ";";
   const fallbackRows = parseCsv(text, fallbackDelimiter);
   return {
     score: 0,
