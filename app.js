@@ -1383,7 +1383,7 @@ function saveArticles(articles) {
 
 function loadBanksState() {
   const fallback = {
-    legalEntities: getDefaultLegalEntities(),
+    legalEntities: [],
     accounts: [],
   };
 
@@ -1420,28 +1420,36 @@ function normalizeBanksState(rawState, fallback) {
     : [];
 
   const normalizedEntities = legalEntities.length > 0 ? legalEntities : fallback.legalEntities;
-  const ensuredEntities = [...normalizedEntities];
-  const usedIds = new Set(ensuredEntities.map((item) => item.id));
-  let nextId = 1;
-
-  while (ensuredEntities.length < 5) {
-    while (usedIds.has(nextId)) nextId += 1;
-    ensuredEntities.push({ id: nextId, name: `Юрлицо ${ensuredEntities.length + 1}` });
-    usedIds.add(nextId);
-  }
 
   let accounts = Array.isArray(rawState.accounts)
     ? rawState.accounts.map((account, idx) => normalizeBankAccount(account, idx))
     : [];
 
-  const entityIds = new Set(ensuredEntities.map((entity) => entity.id));
-  const defaultEntityId = ensuredEntities[0]?.id || 1;
+  const entityIds = new Set(normalizedEntities.map((entity) => entity.id));
+  const defaultEntityId = normalizedEntities[0]?.id || 0;
   accounts = accounts.map((account) =>
-    entityIds.has(account.legalEntityId) ? account : { ...account, legalEntityId: defaultEntityId }
+    entityIds.has(account.legalEntityId) || defaultEntityId === 0
+      ? account
+      : { ...account, legalEntityId: defaultEntityId }
   );
 
+  // Cleanup for older versions that auto-created placeholders "Юрлицо 1..5".
+  const hasOnlyLegacyPlaceholders =
+    normalizedEntities.length > 0 &&
+    normalizedEntities.every((entity, idx) => entity.name === `Юрлицо ${idx + 1}`);
+  const hasNoLinkedAccounts = accounts.every(
+    (account) => !normalizedEntities.some((entity) => entity.id === account.legalEntityId)
+  );
+
+  if (hasOnlyLegacyPlaceholders && hasNoLinkedAccounts) {
+    return {
+      legalEntities: [],
+      accounts,
+    };
+  }
+
   return {
-    legalEntities: ensuredEntities,
+    legalEntities: normalizedEntities,
     accounts,
   };
 }
@@ -1478,16 +1486,6 @@ function normalizeBankAccount(account, idx) {
     transactions,
     summary: summary && summary.latestDate ? summary : transactions.length > 0 ? summarizeBankTransactions(transactions) : null,
   };
-}
-
-function getDefaultLegalEntities() {
-  return [
-    { id: 1, name: "Юрлицо 1" },
-    { id: 2, name: "Юрлицо 2" },
-    { id: 3, name: "Юрлицо 3" },
-    { id: 4, name: "Юрлицо 4" },
-    { id: 5, name: "Юрлицо 5" },
-  ];
 }
 
 function normalizeArticle(row, idx) {
