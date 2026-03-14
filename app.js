@@ -2240,16 +2240,17 @@ function renderStructureTables(structure) {
 function fillStructureTable(bodyEl, rows, emptyText) {
   if (!bodyEl) return;
   if (!rows || rows.length === 0) {
-    bodyEl.innerHTML = `<tr><td colspan="3" class="empty">${emptyText}</td></tr>`;
+    bodyEl.innerHTML = `<tr><td colspan="4" class="empty">${emptyText}</td></tr>`;
     return;
   }
   bodyEl.innerHTML = rows
     .map(
-      (row) => `
+      (row, index) => `
       <tr>
+        <td class="cell-rank">${index + 1}</td>
         <td>${escapeHtml(row.name)}</td>
-        <td>${formatMoney(row.amount)}</td>
-        <td>${formatPercent(row.share)}</td>
+        <td class="cell-number">${formatMoney(row.amount)}</td>
+        <td class="cell-number">${formatPercent(row.share)}</td>
       </tr>
     `
     )

@@ -342,6 +342,25 @@ button.secondary {
   gap: 12px;
 }
 
+.analytics-structure-grid .table-wrap table {
+  min-width: 520px;
+}
+
+.analytics-structure-grid th:first-child,
+.analytics-structure-grid td:first-child {
+  width: 52px;
+}
+
+.cell-rank {
+  text-align: center;
+  font-weight: 600;
+}
+
+.cell-number {
+  text-align: right;
+  white-space: nowrap;
+}
+
 .inline-form {
   display: grid;
   grid-template-columns: 1fr;
@@ -725,6 +744,10 @@ tr.unresolved-row {
   .analytics-actions-main button,
   .analytics-actions-extra button {
     flex: 1 1 auto;
+  }
+
+  .analytics-structure-grid .table-wrap table {
+    min-width: 460px;
   }
 
   .hero h1 {
