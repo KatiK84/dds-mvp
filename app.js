@@ -2370,13 +2370,13 @@ function detectBankHeaderIndexes(rows, candidates) {
     if (row.length < 3) continue;
 
     const headers = row.map((header) => normalizeText(header));
-    const dateIdx = findColumn(headers, candidates.dateCandidates || []);
+    const dateIdx = findColumnByPriority(headers, candidates.dateCandidates || []);
     const sampleRows = rows.slice(i + 1, Math.min(rows.length, i + 61));
     const amountIdx = findAmountColumn(headers, candidates.amountCandidates || [], sampleRows);
-    const debitIdx = findColumn(headers, candidates.debitCandidates || []);
-    const creditIdx = findColumn(headers, candidates.creditCandidates || []);
-    const balanceIdx = findColumn(headers, candidates.balanceCandidates || []);
-    const altDateIdx = findColumn(headers, candidates.altDateCandidates || []);
+    const debitIdx = findColumnByPriority(headers, candidates.debitCandidates || []);
+    const creditIdx = findColumnByPriority(headers, candidates.creditCandidates || []);
+    const balanceIdx = findColumnByPriority(headers, candidates.balanceCandidates || []);
+    const altDateIdx = findColumnByPriority(headers, candidates.altDateCandidates || []);
 
     const hasSeparatedAmount = amountIdx !== -1 && amountIdx !== dateIdx;
     const hasSeparatedDebitCredit =
@@ -2396,6 +2396,20 @@ function detectBankHeaderIndexes(rows, candidates) {
   }
 
   return result;
+}
+
+function findColumnByPriority(headers, candidates) {
+  const normalizedHeaders = (headers || []).map((header) => normalizeText(header));
+  const normalizedCandidates = (candidates || [])
+    .map((candidate) => normalizeText(candidate))
+    .filter(Boolean);
+
+  for (const candidate of normalizedCandidates) {
+    const index = normalizedHeaders.findIndex((header) => header.includes(candidate));
+    if (index !== -1) return index;
+  }
+
+  return -1;
 }
 
 function findAmountColumn(headers, candidates, sampleRows = []) {
