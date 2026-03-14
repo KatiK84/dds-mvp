@@ -781,6 +781,7 @@ function getBankStatementProfile(profileRaw) {
     amountCandidates: ["сумма", "amount", "betrag", "umsatz", "umsatz (eur)", "betrag (eur)"],
     debitCandidates: ["списан", "debit", "расход", "выбыт", "soll", "lastschrift"],
     creditCandidates: ["зачисл", "credit", "приход", "поступ", "haben", "gutschrift"],
+    signCandidates: ["s/h", "soll/haben", "haben/soll", "debit/credit", "credit/debit", "dr/cr", "cr/dr", "kennzeichen"],
     balanceCandidates: ["баланс", "остаток", "balance", "saldo", "kontostand", "kontostand alt", "kontostand neu"],
   };
 
@@ -831,6 +832,7 @@ function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
   const amountCandidates = profile.amountCandidates;
   const debitCandidates = profile.debitCandidates;
   const creditCandidates = profile.creditCandidates;
+  const signCandidates = profile.signCandidates;
   const balanceCandidates = profile.balanceCandidates;
   const {
     headerRowIndex,
@@ -838,6 +840,7 @@ function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
     idxAmount,
     idxDebit,
     idxCredit,
+    idxSign,
     idxBalance,
     idxAltDate,
   } = detectBankHeaderIndexes(rows, {
@@ -846,6 +849,7 @@ function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
     amountCandidates,
     debitCandidates,
     creditCandidates,
+    signCandidates,
     balanceCandidates,
   });
 
@@ -886,17 +890,24 @@ function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
       if (isBalanceSnapshot) {
         amount = 0;
       } else {
-        if (idxAmount >= 0) {
-          amount = parseAmount(String(cells[idxAmount] || ""));
-        }
-
+        const amountRaw = idxAmount >= 0 ? String(cells[idxAmount] || "") : "";
         const debitRaw = idxDebit >= 0 ? String(cells[idxDebit] || "") : "";
         const creditRaw = idxCredit >= 0 ? String(cells[idxCredit] || "") : "";
+        const signRaw = idxSign >= 0 ? String(cells[idxSign] || "") : "";
+
+        if (idxAmount >= 0) {
+          amount = parseAmount(amountRaw);
+        }
 
         if (amount === null && (idxDebit >= 0 || idxCredit >= 0)) {
           amount = resolveSignedAmountFromDebitCreditCells(debitRaw, creditRaw);
-        } else if (Number.isFinite(amount) && (idxDebit >= 0 || idxCredit >= 0)) {
-          const signHint = resolveSignHintFromDebitCreditCells(debitRaw, creditRaw);
+        }
+
+        if (Number.isFinite(amount)) {
+          let signHint = resolveSignHintFromDebitCreditCells(debitRaw, creditRaw);
+          if (signHint === 0) signHint = resolveSignHintFromSignCell(signRaw);
+          if (signHint === 0) signHint = resolveSignHintFromAmountCell(amountRaw);
+          if (signHint === 0) signHint = resolveSignHintFromRowText(cells);
           if (signHint !== 0) {
             amount = Math.abs(amount) * signHint;
           }
@@ -2696,6 +2707,7 @@ function detectBankHeaderIndexes(rows, candidates) {
     idxAmount: -1,
     idxDebit: -1,
     idxCredit: -1,
+    idxSign: -1,
     idxBalance: -1,
     idxAltDate: -1,
   };
@@ -2710,13 +2722,16 @@ function detectBankHeaderIndexes(rows, candidates) {
     const amountIdx = findAmountColumn(headers, candidates.amountCandidates || [], sampleRows);
     const debitIdx = findColumnByPriority(headers, candidates.debitCandidates || []);
     const creditIdx = findColumnByPriority(headers, candidates.creditCandidates || []);
+    const signIdx = findColumnByPriority(headers, candidates.signCandidates || []);
     const balanceIdx = findColumnByPriority(headers, candidates.balanceCandidates || []);
     const altDateIdx = findColumnByPriority(headers, candidates.altDateCandidates || []);
 
     const hasSeparatedAmount = amountIdx !== -1 && amountIdx !== dateIdx;
     const hasSeparatedDebitCredit =
-      (debitIdx !== -1 && debitIdx !== dateIdx) || (creditIdx !== -1 && creditIdx !== dateIdx);
-    const uniqueColumns = new Set([dateIdx, amountIdx, debitIdx, creditIdx].filter((idx) => idx >= 0)).size;
+      (debitIdx !== -1 && debitIdx !== dateIdx) ||
+      (creditIdx !== -1 && creditIdx !== dateIdx) ||
+      (signIdx !== -1 && signIdx !== dateIdx);
+    const uniqueColumns = new Set([dateIdx, amountIdx, debitIdx, creditIdx, signIdx].filter((idx) => idx >= 0)).size;
 
     if (dateIdx !== -1 && (hasSeparatedAmount || hasSeparatedDebitCredit) && uniqueColumns >= 2) {
       result.headerRowIndex = i;
@@ -2724,6 +2739,7 @@ function detectBankHeaderIndexes(rows, candidates) {
       result.idxAmount = amountIdx;
       result.idxDebit = debitIdx;
       result.idxCredit = creditIdx;
+      result.idxSign = signIdx;
       result.idxBalance = balanceIdx;
       result.idxAltDate = altDateIdx;
       break;
@@ -2849,6 +2865,7 @@ function parseCsvWithBestDelimiter(text, profile) {
     ) {
       score += 30;
     }
+    if (headerInfo.idxSign !== -1 && headerInfo.idxSign !== headerInfo.idxDate) score += 14;
     if (avgCols <= 1.2) score -= 100;
     if (headerInfo.headerRowIndex === -1) score -= 120;
     if (maxCols < 3) score -= 120;
@@ -2938,7 +2955,7 @@ function findColumn(headers, candidates) {
 }
 
 function parseAmount(raw) {
-  const source = String(raw || "").trim();
+  const source = String(raw || "").replace(/\u2212/g, "-").trim();
   if (!source) return null;
 
   const digitsOnlyRaw = source.replace(/\D/g, "");
@@ -2946,6 +2963,7 @@ function parseAmount(raw) {
   if (digitsOnlyRaw.length > 18) return null;
   if (!hasSeparators && digitsOnlyRaw.length > 12) return null;
 
+  const isBracketNegative = /^\(.*\)$/.test(source);
   let cleaned = source.replace(/\s/g, "").replace(/[^\d,.-]/g, "");
   if (!cleaned) return null;
 
@@ -2974,7 +2992,8 @@ function parseAmount(raw) {
   }
 
   const value = Number(cleaned);
-  return Number.isFinite(value) ? value : null;
+  if (!Number.isFinite(value)) return null;
+  return isBracketNegative ? -Math.abs(value) : value;
 }
 
 function resolveSignHintFromDebitCreditCells(debitRaw, creditRaw) {
@@ -2998,6 +3017,40 @@ function resolveSignHintFromDebitCreditCells(debitRaw, creditRaw) {
   return 0;
 }
 
+function resolveSignHintFromSignCell(signRaw) {
+  const normalized = normalizeText(signRaw);
+  if (!normalized) return 0;
+  if (isDebitMarker(normalized)) return -1;
+  if (isCreditMarker(normalized)) return 1;
+  return 0;
+}
+
+function resolveSignHintFromAmountCell(amountRaw) {
+  const raw = String(amountRaw || "").trim();
+  if (!raw) return 0;
+  if (raw.startsWith("-") || raw.endsWith("-") || /^\(.*\)$/.test(raw)) return -1;
+
+  const normalized = normalizeText(raw);
+  if (isDebitMarker(normalized)) return -1;
+  if (isCreditMarker(normalized)) return 1;
+
+  const upper = raw.toUpperCase();
+  if (/\bS\b/.test(upper) || /\bDR\b/.test(upper) || /\bDB\b/.test(upper)) return -1;
+  if (/\bH\b/.test(upper) || /\bCR\b/.test(upper)) return 1;
+  return 0;
+}
+
+function resolveSignHintFromRowText(cells) {
+  const rowText = normalizeText((cells || []).join(" "));
+  if (!rowText) return 0;
+
+  const hasDebit = isDebitMarker(rowText);
+  const hasCredit = isCreditMarker(rowText);
+  if (hasDebit && !hasCredit) return -1;
+  if (hasCredit && !hasDebit) return 1;
+  return 0;
+}
+
 function resolveSignedAmountFromDebitCreditCells(debitRaw, creditRaw) {
   const debitNumeric = parseAmount(debitRaw);
   const creditNumeric = parseAmount(creditRaw);
@@ -3017,7 +3070,12 @@ function isDebitMarker(value) {
     value === "-" ||
     value.includes("soll") ||
     value.includes("debit") ||
-    value.includes("lastschrift")
+    value.includes("lastschrift") ||
+    value.includes("belastung") ||
+    value.includes("abbuchung") ||
+    value.includes("ausgang") ||
+    value.includes("abgang") ||
+    value.includes("zahlung")
   );
 }
 
@@ -3029,7 +3087,10 @@ function isCreditMarker(value) {
     value === "+" ||
     value.includes("haben") ||
     value.includes("credit") ||
-    value.includes("gutschrift")
+    value.includes("gutschrift") ||
+    value.includes("eingang") ||
+    value.includes("einzahlung") ||
+    value.includes("erstattung")
   );
 }
 
