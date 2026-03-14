@@ -1425,6 +1425,19 @@ function normalizeBanksState(rawState, fallback) {
     ? rawState.accounts.map((account, idx) => normalizeBankAccount(account, idx))
     : [];
 
+  // Cleanup for older versions that auto-created placeholders "Юрлицо 1..N".
+  const hasOnlyLegacyPlaceholders =
+    normalizedEntities.length > 0 &&
+    normalizedEntities.every((entity) => /^Юрлицо\s+\d+$/i.test(entity.name));
+
+  if (hasOnlyLegacyPlaceholders) {
+    accounts = accounts.map((account) => ({ ...account, legalEntityId: 0 }));
+    return {
+      legalEntities: [],
+      accounts,
+    };
+  }
+
   const entityIds = new Set(normalizedEntities.map((entity) => entity.id));
   const defaultEntityId = normalizedEntities[0]?.id || 0;
   accounts = accounts.map((account) =>
@@ -1432,21 +1445,6 @@ function normalizeBanksState(rawState, fallback) {
       ? account
       : { ...account, legalEntityId: defaultEntityId }
   );
-
-  // Cleanup for older versions that auto-created placeholders "Юрлицо 1..5".
-  const hasOnlyLegacyPlaceholders =
-    normalizedEntities.length > 0 &&
-    normalizedEntities.every((entity, idx) => entity.name === `Юрлицо ${idx + 1}`);
-  const hasNoLinkedAccounts = accounts.every(
-    (account) => !normalizedEntities.some((entity) => entity.id === account.legalEntityId)
-  );
-
-  if (hasOnlyLegacyPlaceholders && hasNoLinkedAccounts) {
-    return {
-      legalEntities: [],
-      accounts,
-    };
-  }
 
   return {
     legalEntities: normalizedEntities,
