@@ -343,6 +343,7 @@ function parseBankStatementCsv(text) {
     "wertstellung",
     "valuta",
   ];
+  const altDateCandidates = ["wert", "wertstellung", "valuta"];
   const amountCandidates = ["сумма", "amount", "betrag", "umsatz", "betrag (eur)"];
   const debitCandidates = ["списан", "debit", "расход", "выбыт", "soll", "lastschrift"];
   const creditCandidates = ["зачисл", "credit", "приход", "поступ", "haben", "gutschrift"];
@@ -354,6 +355,7 @@ function parseBankStatementCsv(text) {
   let idxDebit = -1;
   let idxCredit = -1;
   let idxBalance = -1;
+  let idxAltDate = -1;
 
   for (let i = 0; i < Math.min(rows.length, 25); i += 1) {
     const headers = rows[i].map((header) => normalizeText(header));
@@ -362,6 +364,7 @@ function parseBankStatementCsv(text) {
     const debitIdx = findColumn(headers, debitCandidates);
     const creditIdx = findColumn(headers, creditCandidates);
     const balanceIdx = findColumn(headers, balanceCandidates);
+    const altDateIdx = findColumn(headers, altDateCandidates);
 
     if (dateIdx !== -1 && (amountIdx !== -1 || debitIdx !== -1 || creditIdx !== -1)) {
       headerRowIndex = i;
@@ -370,6 +373,7 @@ function parseBankStatementCsv(text) {
       idxDebit = debitIdx;
       idxCredit = creditIdx;
       idxBalance = balanceIdx;
+      idxAltDate = altDateIdx;
       break;
     }
   }
@@ -385,8 +389,23 @@ function parseBankStatementCsv(text) {
   const parsedRows = rows
     .slice(headerRowIndex + 1)
     .map((cells, index) => {
-      const dateRaw = String(cells[idxDate] || "").trim();
-      const dateObj = parseFlexibleDate(dateRaw);
+      const rowText = normalizeText(cells.join(" "));
+      const isBalanceSnapshot =
+        rowText.includes("kontostand") ||
+        rowText.includes("saldo") ||
+        rowText.includes("anfangssaldo") ||
+        rowText.includes("endsaldo");
+
+      const primaryDateRaw = String(cells[idxDate] || "").trim();
+      const altDateRaw = idxAltDate >= 0 ? String(cells[idxAltDate] || "").trim() : "";
+
+      let dateObj = parseFlexibleDate(primaryDateRaw);
+      if (!dateObj && altDateRaw) {
+        dateObj = parseFlexibleDate(altDateRaw);
+      }
+      if (!dateObj) {
+        dateObj = findDateInCells(cells);
+      }
       if (!dateObj) return null;
 
       let amount = null;
@@ -401,10 +420,17 @@ function parseBankStatementCsv(text) {
       }
 
       if (amount === null || !Number.isFinite(amount)) {
+        amount = isBalanceSnapshot ? 0 : null;
+      }
+
+      if (amount === null || !Number.isFinite(amount)) {
         return null;
       }
 
-      const balance = idxBalance >= 0 ? parseAmount(String(cells[idxBalance] || "")) : null;
+      let balance = idxBalance >= 0 ? parseAmount(String(cells[idxBalance] || "")) : null;
+      if ((balance === null || !Number.isFinite(balance)) && isBalanceSnapshot) {
+        balance = extractAmountFromCells(cells);
+      }
 
       return {
         idx: index + headerRowIndex + 1,
@@ -431,22 +457,26 @@ function summarizeBankTransactions(transactions) {
     return null;
   }
 
-  const latest = transactions[transactions.length - 1];
+  const sorted = [...transactions].sort((a, b) => {
+    const byDate = a.dateObj.getTime() - b.dateObj.getTime();
+    return byDate !== 0 ? byDate : (a.idx || 0) - (b.idx || 0);
+  });
+
+  const latest = sorted[sorted.length - 1];
   const monthStart = new Date(latest.dateObj.getFullYear(), latest.dateObj.getMonth(), 1);
 
-  const inMonth = transactions.filter((tx) => tx.dateObj >= monthStart);
+  const inMonth = sorted.filter((tx) => tx.dateObj >= monthStart);
   const latestInMonthWithBalance = [...inMonth].reverse().find((tx) => tx.balance !== null) || null;
-  const latestOverallWithBalance = [...transactions].reverse().find((tx) => tx.balance !== null) || null;
-  const beforeMonthWithBalance = [...transactions]
+  const latestOverallWithBalance = [...sorted].reverse().find((tx) => tx.balance !== null) || null;
+  const beforeMonthWithBalance = [...sorted]
     .filter((tx) => tx.dateObj < monthStart && tx.balance !== null)
     .at(-1);
   const firstMonthWithBalance = inMonth.find((tx) => tx.balance !== null) || null;
+  const monthHasMovement = inMonth.some((tx) => Math.abs(tx.amount) > 0.000001);
 
-  let openingBalance = null;
-  if (beforeMonthWithBalance) {
-    openingBalance = beforeMonthWithBalance.balance;
-  } else if (firstMonthWithBalance) {
-    openingBalance = firstMonthWithBalance.balance - firstMonthWithBalance.amount;
+  let openingBalance = beforeMonthWithBalance ? beforeMonthWithBalance.balance : null;
+  if (openingBalance === null && firstMonthWithBalance && !monthHasMovement) {
+    openingBalance = firstMonthWithBalance.balance;
   }
 
   const monthEndBalance = latestInMonthWithBalance ? latestInMonthWithBalance.balance : null;
@@ -580,10 +610,19 @@ function summarizeBankTransactionsByMonth(transactions) {
 
   return [...grouped.values()]
     .map(({ month, transactions: monthTx }) => {
-      const firstWithBalance = monthTx.find((tx) => tx.balance !== null) || null;
+      const monthStartDate = parseFlexibleDate(`${month}-01`);
+      if (!monthStartDate) return null;
       const lastWithBalance = [...monthTx].reverse().find((tx) => tx.balance !== null) || null;
+      const beforeMonthWithBalance = sorted
+        .filter((tx) => tx.dateObj < monthStartDate && tx.balance !== null)
+        .at(-1);
+      const firstWithBalance = monthTx.find((tx) => tx.balance !== null) || null;
+      const monthHasMovement = monthTx.some((tx) => Math.abs(tx.amount) > 0.000001);
 
-      const openingBalance = firstWithBalance ? firstWithBalance.balance - firstWithBalance.amount : null;
+      let openingBalance = beforeMonthWithBalance ? beforeMonthWithBalance.balance : null;
+      if (openingBalance === null && firstWithBalance && !monthHasMovement) {
+        openingBalance = firstWithBalance.balance;
+      }
       const endBalance = lastWithBalance ? lastWithBalance.balance : null;
 
       const inflow = monthTx.filter((tx) => tx.amount > 0).reduce((sum, tx) => sum + tx.amount, 0);
@@ -598,6 +637,7 @@ function summarizeBankTransactionsByMonth(transactions) {
         net: inflow - outflow,
       };
     })
+    .filter(Boolean)
     .sort((a, b) => b.month.localeCompare(a.month));
 }
 
@@ -1914,6 +1954,37 @@ function parseFlexibleDate(raw) {
   }
 
   return date;
+}
+
+function findDateInCells(cells) {
+  for (const cell of cells) {
+    const value = String(cell || "").trim();
+    if (!value) continue;
+
+    const date = parseFlexibleDate(value);
+    if (date) return date;
+  }
+
+  return null;
+}
+
+function extractAmountFromCells(cells) {
+  let candidate = null;
+
+  for (const cell of cells) {
+    const raw = String(cell || "").trim();
+    if (!raw) continue;
+
+    const amount = parseAmount(raw);
+    if (amount === null || !Number.isFinite(amount)) continue;
+
+    // Keep the amount with highest absolute value, usually this is the balance.
+    if (candidate === null || Math.abs(amount) > Math.abs(candidate)) {
+      candidate = amount;
+    }
+  }
+
+  return candidate;
 }
 
 function resolveOperationType(typeRaw, amountValue) {
