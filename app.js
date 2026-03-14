@@ -5382,10 +5382,11 @@ function parseFlexibleDate(raw) {
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
-  const isoWithTime = clean.match(/^(\d{4}-\d{2}-\d{2})T/);
-  if (isoWithTime) {
-    const date = new Date(`${isoWithTime[1]}T00:00:00`);
-    return Number.isNaN(date.getTime()) ? null : date;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(clean)) {
+    const fullDate = new Date(clean);
+    if (!Number.isNaN(fullDate.getTime())) {
+      return new Date(fullDate.getFullYear(), fullDate.getMonth(), fullDate.getDate());
+    }
   }
 
   const parts = clean.split(/[./-]/).map((item) => item.trim());
