@@ -9,63 +9,113 @@
   <body>
     <main class="app">
       <header class="hero">
-        <h1>Справочник статей ДДС</h1>
-        <p>Изолированная MVP-версия для просмотра, фильтрации и выгрузки статей.</p>
+        <h1>ДДС отчет (MVP)</h1>
+        <p>Загрузите операции CSV и получите отчет ДДС по статьям, видам деятельности и месяцам.</p>
       </header>
 
-      <section class="metrics" id="metrics"></section>
+      <section class="card importer">
+        <h2>1. Загрузка операций</h2>
+        <p class="hint">
+          Ожидаемые поля CSV: <code>Дата</code>, <code>Статья ДДС</code>, <code>Сумма</code>,
+          <code>Группа</code> (опционально: Поступление/Выбытие).
+        </p>
 
-      <section class="controls">
-        <label>
-          Поиск
-          <input id="searchInput" type="search" placeholder="Название, описание, комментарий" />
-        </label>
+        <div class="import-actions">
+          <label class="file-field">
+            <span>Файл операций CSV</span>
+            <input id="operationsFile" type="file" accept=".csv,text/csv" />
+          </label>
+          <button id="loadSampleBtn" type="button" class="secondary">Загрузить пример</button>
+          <button id="downloadTemplateBtn" type="button" class="secondary">Скачать шаблон CSV</button>
+        </div>
 
-        <label>
-          Группа
-          <select id="groupFilter">
-            <option value="all">Все</option>
-          </select>
-        </label>
-
-        <label>
-          Вид деятельности
-          <select id="activityFilter">
-            <option value="all">Все</option>
-          </select>
-        </label>
-
-        <label>
-          Статус
-          <select id="statusFilter">
-            <option value="all">Все</option>
-            <option value="ACTIVE">Активные</option>
-            <option value="INACTIVE">Неактуальные</option>
-            <option value="DELETE">Удалить</option>
-            <option value="RENAME">Переименовать/заменить</option>
-          </select>
-        </label>
-
-        <button id="downloadCsv" type="button">Скачать CSV</button>
+        <p id="fileStatus" class="status">Файл не загружен.</p>
       </section>
 
-      <section class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>№ статьи</th>
-              <th>Статья ДДС</th>
-              <th>Группа</th>
-              <th>Вид деятельности</th>
-              <th>Описание</th>
-              <th>Источник</th>
-              <th>Комментарий</th>
-              <th>Статус</th>
-            </tr>
-          </thead>
-          <tbody id="tableBody"></tbody>
-        </table>
+      <section class="card controls">
+        <h2>2. Фильтры отчета</h2>
+        <div class="controls-grid">
+          <label>
+            Дата с
+            <input id="dateFrom" type="date" />
+          </label>
+
+          <label>
+            Дата по
+            <input id="dateTo" type="date" />
+          </label>
+
+          <label>
+            Вид деятельности
+            <select id="activityFilter">
+              <option value="all">Все</option>
+            </select>
+          </label>
+
+          <button id="resetFilters" type="button" class="secondary">Сбросить фильтры</button>
+          <button id="downloadReportCsv" type="button">Скачать отчет CSV</button>
+        </div>
       </section>
+
+      <section class="metrics" id="reportMetrics"></section>
+
+      <section class="table-card">
+        <h2>3. Отчет ДДС по статьям</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Вид деятельности</th>
+                <th>Статья ДДС</th>
+                <th>Поступления</th>
+                <th>Выбытия</th>
+                <th>Чистый поток</th>
+                <th>Операций</th>
+              </tr>
+            </thead>
+            <tbody id="reportTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="table-card">
+        <h2>4. Сводка по месяцам</h2>
+        <div class="table-wrap small">
+          <table>
+            <thead>
+              <tr>
+                <th>Месяц</th>
+                <th>Поступления</th>
+                <th>Выбытия</th>
+                <th>Чистый поток</th>
+              </tr>
+            </thead>
+            <tbody id="monthTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <details class="card dictionary" open>
+        <summary>Справочник статей ДДС (вспомогательно)</summary>
+        <label>
+          Поиск по справочнику
+          <input id="dictionarySearch" type="search" placeholder="Название статьи" />
+        </label>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>№ статьи</th>
+                <th>Статья ДДС</th>
+                <th>Группа</th>
+                <th>Вид деятельности</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody id="dictionaryBody"></tbody>
+          </table>
+        </div>
+      </details>
     </main>
 
     <script src="./app.js"></script>
