@@ -2559,6 +2559,14 @@ function parseAmount(raw) {
     } else {
       cleaned = cleaned.replace(/,/g, "");
     }
+  } else if (cleaned.includes(".") && !cleaned.includes(",")) {
+    const sign = cleaned.startsWith("-") ? "-" : "";
+    const unsigned = sign ? cleaned.slice(1) : cleaned;
+
+    // German thousands format without decimals: 10.000 or 1.234.567
+    if (/^\d{1,3}(\.\d{3})+$/.test(unsigned)) {
+      cleaned = `${sign}${unsigned.replace(/\./g, "")}`;
+    }
   } else if (cleaned.includes(",")) {
     cleaned = cleaned.replace(",", ".");
   }
