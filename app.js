@@ -754,7 +754,11 @@ function summarizeBankTransactions(transactions, manualOpeningBalances = {}) {
   const latestOverallWithBalance = [...sorted].reverse().find((tx) => tx.balance !== null) || null;
   const openingBalance = latestMonthRow ? latestMonthRow.openingBalance : null;
   const monthEndBalance = latestMonthRow ? latestMonthRow.endBalance : null;
-  const latestBalance = latestOverallWithBalance ? latestOverallWithBalance.balance : null;
+  const latestBalance = Number.isFinite(monthEndBalance)
+    ? monthEndBalance
+    : latestOverallWithBalance
+      ? latestOverallWithBalance.balance
+      : null;
   const inflow = latestMonthRow ? latestMonthRow.inflow : 0;
   const outflow = latestMonthRow ? latestMonthRow.outflow : 0;
 
@@ -992,8 +996,11 @@ function summarizeBankTransactionsByMonth(transactions, manualOpeningBalances = 
       current.openingBalance = prev.endBalance;
     }
 
-    if (!Number.isFinite(current.endBalance) && Number.isFinite(current.openingBalance)) {
-      current.endBalance = current.openingBalance + current.net;
+    if (Number.isFinite(current.openingBalance)) {
+      const calculatedEnd = current.openingBalance + current.net;
+      if (!Number.isFinite(current.endBalance) || Math.abs(current.endBalance - calculatedEnd) > 0.01) {
+        current.endBalance = calculatedEnd;
+      }
     }
   }
 
