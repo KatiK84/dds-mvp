@@ -970,40 +970,36 @@ function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
       }
       if (!dateObj) return null;
 
+      const amountRaw = idxAmount >= 0 ? String(cells[idxAmount] || "") : "";
+      const debitRaw = idxDebit >= 0 ? String(cells[idxDebit] || "") : "";
+      const creditRaw = idxCredit >= 0 ? String(cells[idxCredit] || "") : "";
+      const signRaw = idxSign >= 0 ? String(cells[idxSign] || "") : "";
+
       let amount = null;
-      if (isBalanceSnapshot) {
-        amount = 0;
-      } else {
-        const amountRaw = idxAmount >= 0 ? String(cells[idxAmount] || "") : "";
-        const debitRaw = idxDebit >= 0 ? String(cells[idxDebit] || "") : "";
-        const creditRaw = idxCredit >= 0 ? String(cells[idxCredit] || "") : "";
-        const signRaw = idxSign >= 0 ? String(cells[idxSign] || "") : "";
+      if (idxAmount >= 0) {
+        amount = parseAmount(amountRaw);
+      }
 
-        if (idxAmount >= 0) {
-          amount = parseAmount(amountRaw);
-        }
+      if (amount === null && (idxDebit >= 0 || idxCredit >= 0)) {
+        amount = resolveSignedAmountFromDebitCreditCells(debitRaw, creditRaw);
+      }
 
-        if (amount === null && (idxDebit >= 0 || idxCredit >= 0)) {
-          amount = resolveSignedAmountFromDebitCreditCells(debitRaw, creditRaw);
-        }
-
-        if (Number.isFinite(amount)) {
-          let signHint = resolveSignHintFromDebitCreditCells(debitRaw, creditRaw);
-          if (signHint === 0) signHint = resolveSignHintFromSignCell(signRaw);
-          if (signHint === 0) signHint = resolveSignHintFromAmountCell(amountRaw);
-          if (signHint === 0) signHint = resolveSignHintFromRowText(cells);
-          if (signHint !== 0) {
-            amount = Math.abs(amount) * signHint;
-          }
-        }
-
-        if (amount === null || !Number.isFinite(amount)) {
-          amount = null;
+      if (Number.isFinite(amount)) {
+        let signHint = resolveSignHintFromDebitCreditCells(debitRaw, creditRaw);
+        if (signHint === 0) signHint = resolveSignHintFromSignCell(signRaw);
+        if (signHint === 0) signHint = resolveSignHintFromAmountCell(amountRaw);
+        if (signHint === 0) signHint = resolveSignHintFromRowText(cells);
+        if (signHint !== 0) {
+          amount = Math.abs(amount) * signHint;
         }
       }
 
       if (amount === null || !Number.isFinite(amount)) {
-        return null;
+        if (isBalanceSnapshot) {
+          amount = 0;
+        } else {
+          return null;
+        }
       }
 
       let balance = idxBalance >= 0 ? parseAmount(String(cells[idxBalance] || "")) : null;
@@ -1379,7 +1375,9 @@ function summarizeBankTransactionsByMonth(transactions, manualOpeningBalances = 
 
     if (Number.isFinite(current.openingBalance)) {
       const calculatedEnd = current.openingBalance + current.net;
-      if (!Number.isFinite(current.endBalance) || Math.abs(current.endBalance - calculatedEnd) > 0.01) {
+      // Keep end balance from statement when it exists.
+      // Use calculated fallback only if statement balance is missing.
+      if (!Number.isFinite(current.endBalance)) {
         current.endBalance = calculatedEnd;
       }
     }
