@@ -5035,18 +5035,42 @@ function cleanupLegacyPlaceholderEntities(persist) {
   }
 }
 
+function sanitizePersistedTransactionBalances(transactions) {
+  if (!Array.isArray(transactions) || transactions.length === 0) return transactions;
+
+  const hasNonZeroMovement = transactions.some(
+    (tx) => Number.isFinite(tx?.amount) && Math.abs(Number(tx.amount)) > 0.000001
+  );
+  if (!hasNonZeroMovement) return transactions;
+
+  const hasAnyZeroBalance = transactions.some((tx) => tx?.balance === 0);
+  const hasAnyNonZeroBalance = transactions.some(
+    (tx) => Number.isFinite(tx?.balance) && Math.abs(Number(tx.balance)) > 0.000001
+  );
+
+  // Migration guard:
+  // old versions converted null balances to 0 on reload.
+  // If all parsed balances are exactly zero while movements are non-zero,
+  // treat those zeros as "no balance provided".
+  if (!hasAnyZeroBalance || hasAnyNonZeroBalance) return transactions;
+
+  return transactions.map((tx) => (tx.balance === 0 ? { ...tx, balance: null } : tx));
+}
+
 function normalizeBankAccount(account, idx) {
-  const legacyTransactions = Array.isArray(account?.transactions)
+  const legacyTransactions = sanitizePersistedTransactionBalances(
+    Array.isArray(account?.transactions)
     ? account.transactions
         .map((tx, txIdx) => ({
           idx: Number(tx?.idx) || txIdx,
           dateObj: parseFlexibleDate(tx?.dateObj || tx?.dateRaw || ""),
           altDateObj: parseFlexibleDate(tx?.altDateObj || ""),
           amount: Number(tx?.amount),
-          balance: Number.isFinite(Number(tx?.balance)) ? Number(tx.balance) : null,
+          balance: toMaybeNumber(tx?.balance),
         }))
         .filter((tx) => tx.dateObj && Number.isFinite(tx.amount))
-    : [];
+    : []
+  );
 
   let monthlyStatements = {};
 
@@ -5055,17 +5079,19 @@ function normalizeBankAccount(account, idx) {
       const month = normalizeMonthKey(rawMonth || rawStatement?.month);
       if (!month) return acc;
 
-      const statementTransactions = Array.isArray(rawStatement?.transactions)
+      const statementTransactions = sanitizePersistedTransactionBalances(
+        Array.isArray(rawStatement?.transactions)
         ? rawStatement.transactions
             .map((tx, txIdx) => ({
               idx: Number(tx?.idx) || txIdx,
               dateObj: parseFlexibleDate(tx?.dateObj || tx?.dateRaw || ""),
               altDateObj: parseFlexibleDate(tx?.altDateObj || ""),
               amount: Number(tx?.amount),
-              balance: Number.isFinite(Number(tx?.balance)) ? Number(tx.balance) : null,
+              balance: toMaybeNumber(tx?.balance),
             }))
             .filter((tx) => tx.dateObj && Number.isFinite(tx.amount))
-        : [];
+        : []
+      );
 
       acc[month] = {
         month,
@@ -5909,6 +5935,8 @@ function formatPercent(value) {
 }
 
 function toMaybeNumber(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
