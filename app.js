@@ -58,11 +58,28 @@ const SAMPLE_OPERATIONS = `Дата;Контрагент;Статья ДДС;С�
 2026-03-04;Bank XYZ;08 фонд Кредитов (поступление);25000;Поступление;Получен кредит
 2026-03-18;Bank XYZ;;-5000;Выбытие;Погашение кредита`;
 
+const SAMPLE_PLAN_ITEMS = `month;date;legal_entity;bank_account;activity;dds_article;type;amount;probability;scenario;comment
+2026-04;2026-04-05;GH GmbH;Deutsche 00;01 Операционная деятельность;01 фонд GH;Поступление;120000;high;base;Оплаты клиентов
+2026-04;2026-04-10;GH GmbH;Deutsche 00;01 Операционная деятельность;06 ФОТ (оклад);Выбытие;35000;high;base;Зарплата
+2026-04;2026-04-15;GH GmbH;Commerzbank;01 Операционная деятельность;07 фонд Поставщиков (выбытие);Выбытие;42000;medium;base;Закупка`;
+
+const SAMPLE_PLAN_OPENINGS = `month;legal_entity;bank_account;opening_balance
+2026-04;GH GmbH;Deutsche 00;75654.83
+2026-04;GH GmbH;Commerzbank;10473.01`;
+
+const SAMPLE_PLAN_ASSUMPTIONS = `scenario;inflow_factor;outflow_factor
+base;1.00;1.00
+pessimistic;0.85;1.10
+optimistic;1.10;0.95`;
+
 const STORAGE_ARTICLES_KEY = "dds_mvp_articles_v2";
 const STORAGE_BANKS_KEY = "dds_mvp_banks_v1";
 const STORAGE_ACCESS_KEY = "dds_mvp_access_v1";
 const STORAGE_CHANGE_LOG_KEY = "dds_mvp_change_log_v1";
+const STORAGE_PLAN_KEY = "dds_mvp_plan_v1";
+const STORAGE_ANALYTICS_KEY = "dds_mvp_analytics_v1";
 const CHANGE_LOG_LIMIT = 3000;
+const ANALYTICS_PRIMARY_FINDINGS_LIMIT = 7;
 const UNKNOWN_ARTICLE = "Статья неизвестна";
 const UNKNOWN_ACTIVITY = "03 Финансовая деятельность";
 const ROLE_CONFIG = {
@@ -81,6 +98,10 @@ const ROLE_CONFIG = {
       "banks.statement.removeMonth",
       "banks.account.status",
       "access.users.manage",
+      "plan.manage",
+      "plan.export",
+      "analytics.settings",
+      "analytics.export",
       "articles.manage",
       "articles.export",
       "changelog.export",
@@ -99,6 +120,10 @@ const ROLE_CONFIG = {
       "banks.statement.profile",
       "banks.opening.manage",
       "banks.statement.removeMonth",
+      "plan.manage",
+      "plan.export",
+      "analytics.settings",
+      "analytics.export",
       "articles.export",
       "changelog.export",
     ],
@@ -106,7 +131,7 @@ const ROLE_CONFIG = {
   VIEWER: {
     label: "Просмотр",
     rightsLabel: "Только просмотр и выгрузки, без изменений данных.",
-    permissions: ["report.export", "reconcile.export", "articles.export", "changelog.export"],
+    permissions: ["report.export", "reconcile.export", "plan.export", "analytics.export", "articles.export", "changelog.export"],
   },
 };
 const BANK_PARSER_PROFILES = [
@@ -120,6 +145,8 @@ const state = {
   activeTab: "report",
   articles: loadArticles(),
   banks: loadBanksState(),
+  plan: loadPlanState(),
+  analytics: loadAnalyticsState(),
   access: loadAccessState(),
   changeLog: loadChangeLog(),
   banksUi: {
@@ -144,6 +171,8 @@ const els = {
   accessApplyRole: document.getElementById("accessApplyRole"),
   accessRoleHint: document.getElementById("accessRoleHint"),
   reportTab: document.getElementById("reportTab"),
+  planTab: document.getElementById("planTab"),
+  analyticsTab: document.getElementById("analyticsTab"),
   banksTab: document.getElementById("banksTab"),
   reconcileTab: document.getElementById("reconcileTab"),
   articlesTab: document.getElementById("articlesTab"),
@@ -184,6 +213,59 @@ const els = {
   shortDdsTableBody: document.getElementById("shortDdsTableBody"),
   reportTableBody: document.getElementById("reportTableBody"),
   monthTableBody: document.getElementById("monthTableBody"),
+  planItemsFile: document.getElementById("planItemsFile"),
+  planOpeningsFile: document.getElementById("planOpeningsFile"),
+  planAssumptionsFile: document.getElementById("planAssumptionsFile"),
+  downloadPlanItemsTemplateBtn: document.getElementById("downloadPlanItemsTemplateBtn"),
+  downloadPlanOpeningsTemplateBtn: document.getElementById("downloadPlanOpeningsTemplateBtn"),
+  downloadPlanAssumptionsTemplateBtn: document.getElementById("downloadPlanAssumptionsTemplateBtn"),
+  clearPlanDataBtn: document.getElementById("clearPlanDataBtn"),
+  planScenarioSelect: document.getElementById("planScenarioSelect"),
+  planProbabilityFilter: document.getElementById("planProbabilityFilter"),
+  downloadPlanCsvBtn: document.getElementById("downloadPlanCsvBtn"),
+  planItemsStatus: document.getElementById("planItemsStatus"),
+  planOpeningsStatus: document.getElementById("planOpeningsStatus"),
+  planAssumptionsStatus: document.getElementById("planAssumptionsStatus"),
+  planStatus: document.getElementById("planStatus"),
+  planMetrics: document.getElementById("planMetrics"),
+  planMonthTableBody: document.getElementById("planMonthTableBody"),
+  planActivityTableBody: document.getElementById("planActivityTableBody"),
+  analyticsSettingsForm: document.getElementById("analyticsSettingsForm"),
+  analyticsDateFrom: document.getElementById("analyticsDateFrom"),
+  analyticsDateTo: document.getElementById("analyticsDateTo"),
+  analyticsCompareMode: document.getElementById("analyticsCompareMode"),
+  analyticsForecastHorizon: document.getElementById("analyticsForecastHorizon"),
+  analyticsForecastMode: document.getElementById("analyticsForecastMode"),
+  analyticsScenario: document.getElementById("analyticsScenario"),
+  analyticsOpeningBalance: document.getElementById("analyticsOpeningBalance"),
+  analyticsSafeBalanceFixed: document.getElementById("analyticsSafeBalanceFixed"),
+  analyticsSafeBalancePercent: document.getElementById("analyticsSafeBalancePercent"),
+  analyticsSafeBalanceMode: document.getElementById("analyticsSafeBalanceMode"),
+  analyticsTop1Threshold: document.getElementById("analyticsTop1Threshold"),
+  analyticsTop3Threshold: document.getElementById("analyticsTop3Threshold"),
+  analyticsExpenseShareThreshold: document.getElementById("analyticsExpenseShareThreshold"),
+  analyticsInvestmentLoadThreshold: document.getElementById("analyticsInvestmentLoadThreshold"),
+  analyticsOutflowSurgeThreshold: document.getElementById("analyticsOutflowSurgeThreshold"),
+  analyticsOutflowSurgeLookback: document.getElementById("analyticsOutflowSurgeLookback"),
+  analyticsScenarioOptimisticInflow: document.getElementById("analyticsScenarioOptimisticInflow"),
+  analyticsScenarioOptimisticOutflow: document.getElementById("analyticsScenarioOptimisticOutflow"),
+  analyticsScenarioConservativeInflow: document.getElementById("analyticsScenarioConservativeInflow"),
+  analyticsScenarioConservativeOutflow: document.getElementById("analyticsScenarioConservativeOutflow"),
+  analyticsApplyBtn: document.getElementById("analyticsApplyBtn"),
+  analyticsSyncWithReportBtn: document.getElementById("analyticsSyncWithReportBtn"),
+  analyticsExportBtn: document.getElementById("analyticsExportBtn"),
+  analyticsPrintBtn: document.getElementById("analyticsPrintBtn"),
+  analyticsStatus: document.getElementById("analyticsStatus"),
+  analyticsSummaryMetrics: document.getElementById("analyticsSummaryMetrics"),
+  analyticsFindingsList: document.getElementById("analyticsFindingsList"),
+  analyticsToggleFindingsBtn: document.getElementById("analyticsToggleFindingsBtn"),
+  analyticsRecommendationsList: document.getElementById("analyticsRecommendationsList"),
+  analyticsInflowTopArticlesBody: document.getElementById("analyticsInflowTopArticlesBody"),
+  analyticsOutflowTopArticlesBody: document.getElementById("analyticsOutflowTopArticlesBody"),
+  analyticsInflowTopCounterpartiesBody: document.getElementById("analyticsInflowTopCounterpartiesBody"),
+  analyticsOutflowTopCounterpartiesBody: document.getElementById("analyticsOutflowTopCounterpartiesBody"),
+  analyticsComparisonBody: document.getElementById("analyticsComparisonBody"),
+  analyticsForecastBody: document.getElementById("analyticsForecastBody"),
   unresolvedOnly: document.getElementById("unresolvedOnly"),
   downloadUnresolvedCsv: document.getElementById("downloadUnresolvedCsv"),
   reconcileStatus: document.getElementById("reconcileStatus"),
@@ -216,6 +298,8 @@ function init() {
   bindAccessEvents();
   bindChangeLogEvents();
   bindReportEvents();
+  bindPlanEvents();
+  bindAnalyticsEvents();
   bindBankEvents();
   bindReconcileEvents();
   bindArticleEvents();
@@ -225,6 +309,8 @@ function init() {
   renderBanksTab();
   renderArticlesTable();
   renderReport();
+  renderPlanTab();
+  renderAnalyticsTab();
   renderReconcileTable();
   renderChangeLog();
   applyRoleAccess();
@@ -244,6 +330,8 @@ function setActiveTab(tabName) {
   });
 
   els.reportTab.classList.toggle("active", tabName === "report");
+  els.planTab.classList.toggle("active", tabName === "plan");
+  els.analyticsTab.classList.toggle("active", tabName === "analytics");
   els.banksTab.classList.toggle("active", tabName === "banks");
   els.reconcileTab.classList.toggle("active", tabName === "reconcile");
   els.articlesTab.classList.toggle("active", tabName === "articles");
@@ -317,6 +405,8 @@ function setAccessRole(nextRole, nextUserRaw) {
     renderBanksTab();
     renderArticlesTable();
     renderReport();
+    renderPlanTab();
+    renderAnalyticsTab();
     renderReconcileTable();
   } else {
     renderChangeLog();
@@ -365,6 +455,10 @@ function applyRoleAccess() {
   const canExportChangeLog = hasPermission("changelog.export");
   const canClearChangeLog = hasPermission("changelog.clear");
   const canManageUsers = hasPermission("access.users.manage");
+  const canManagePlan = hasPermission("plan.manage");
+  const canExportPlan = hasPermission("plan.export");
+  const canManageAnalytics = hasPermission("analytics.settings");
+  const canExportAnalytics = hasPermission("analytics.export");
 
   setElementDisabled(els.operationsFile, !canImportReport);
   setElementDisabled(els.loadSampleBtn, !canImportReport);
@@ -381,6 +475,19 @@ function applyRoleAccess() {
   setElementDisabled(els.changeLogClearBtn, !canClearChangeLog);
   setElementDisabled(els.accessAddUserBtn, !canManageUsers);
   setElementDisabled(els.accessNewUserInput, !canManageUsers);
+  setElementDisabled(els.planItemsFile, !canManagePlan);
+  setElementDisabled(els.planOpeningsFile, !canManagePlan);
+  setElementDisabled(els.planAssumptionsFile, !canManagePlan);
+  setElementDisabled(els.downloadPlanItemsTemplateBtn, !canManagePlan);
+  setElementDisabled(els.downloadPlanOpeningsTemplateBtn, !canManagePlan);
+  setElementDisabled(els.downloadPlanAssumptionsTemplateBtn, !canManagePlan);
+  setElementDisabled(els.clearPlanDataBtn, !canManagePlan);
+  setElementDisabled(els.downloadPlanCsvBtn, !canExportPlan);
+  setFormDisabled(els.analyticsSettingsForm, !canManageAnalytics);
+  setElementDisabled(els.analyticsApplyBtn, !canManageAnalytics);
+  setElementDisabled(els.analyticsSyncWithReportBtn, !canManageAnalytics);
+  setElementDisabled(els.analyticsExportBtn, !canExportAnalytics);
+  setElementDisabled(els.analyticsPrintBtn, !canExportAnalytics);
   if (!canManageArticles) {
     closeArticleForm();
   }
@@ -468,6 +575,1602 @@ function bindReportEvents() {
   els.activityFilter.addEventListener("change", renderReport);
   els.resetFiltersBtn.addEventListener("click", resetReportFilters);
   els.downloadReportCsvBtn.addEventListener("click", downloadReportCsv);
+}
+
+function bindPlanEvents() {
+  els.planItemsFile?.addEventListener("change", (event) => {
+    const [file] = event.target.files || [];
+    if (!file) return;
+    uploadPlanCsv("items", file);
+  });
+
+  els.planOpeningsFile?.addEventListener("change", (event) => {
+    const [file] = event.target.files || [];
+    if (!file) return;
+    uploadPlanCsv("openings", file);
+  });
+
+  els.planAssumptionsFile?.addEventListener("change", (event) => {
+    const [file] = event.target.files || [];
+    if (!file) return;
+    uploadPlanCsv("assumptions", file);
+  });
+
+  els.downloadPlanItemsTemplateBtn?.addEventListener("click", downloadPlanItemsTemplateCsv);
+  els.downloadPlanOpeningsTemplateBtn?.addEventListener("click", downloadPlanOpeningsTemplateCsv);
+  els.downloadPlanAssumptionsTemplateBtn?.addEventListener("click", downloadPlanAssumptionsTemplateCsv);
+  els.downloadPlanCsvBtn?.addEventListener("click", downloadPlanForecastCsv);
+  els.clearPlanDataBtn?.addEventListener("click", clearPlanData);
+
+  els.planScenarioSelect?.addEventListener("change", () => {
+    state.plan.selectedScenario = normalizePlanScenario(els.planScenarioSelect.value || "base");
+    persistPlanAndRender(false);
+  });
+
+  els.planProbabilityFilter?.addEventListener("change", () => {
+    const next = String(els.planProbabilityFilter.value || "all");
+    state.plan.probabilityFilter = ["all", "high", "medium-high"].includes(next) ? next : "all";
+    persistPlanAndRender(false);
+  });
+}
+
+function uploadPlanCsv(kind, file) {
+  if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут загружать план.")) return;
+  const fileName = String(file?.name || "").trim();
+  if (!fileName.toLowerCase().endsWith(".csv")) {
+    alert("Загрузите CSV-файл.");
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const text = String(reader.result || "");
+      if (kind === "items") {
+        state.plan.items = parsePlanItemsCsv(text);
+        state.plan.sourceFiles.items = fileName;
+        logChange("PLAN_ITEMS_IMPORTED", "План/Прогноз", `${fileName}; строк: ${state.plan.items.length}`);
+      } else if (kind === "openings") {
+        state.plan.openings = parsePlanOpeningsCsv(text);
+        state.plan.sourceFiles.openings = fileName;
+        logChange("PLAN_OPENINGS_IMPORTED", "План/Прогноз", `${fileName}; строк: ${state.plan.openings.length}`);
+      } else if (kind === "assumptions") {
+        state.plan.assumptions = parsePlanAssumptionsCsv(text);
+        state.plan.sourceFiles.assumptions = fileName;
+        logChange("PLAN_ASSUMPTIONS_IMPORTED", "План/Прогноз", `${fileName}; строк: ${state.plan.assumptions.length}`);
+      } else {
+        return;
+      }
+
+      ensurePlanScenarioSelection();
+      persistPlanAndRender(false);
+    } catch (error) {
+      alert(`Ошибка загрузки планового CSV: ${error.message}`);
+    }
+  };
+  reader.onerror = () => {
+    alert("Не удалось прочитать файл.");
+  };
+  reader.readAsText(file, "utf-8");
+}
+
+function clearPlanData() {
+  if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут очищать плановые данные.")) return;
+  const firstConfirm = window.confirm("Очистить все данные планирования?");
+  if (!firstConfirm) return;
+  const phrase = window.prompt("Для подтверждения введите: ОЧИСТИТЬ ПЛАН");
+  if (phrase !== "ОЧИСТИТЬ ПЛАН") {
+    alert("Очистка отменена: подтверждение не совпало.");
+    return;
+  }
+
+  state.plan = createDefaultPlanState();
+  if (els.planItemsFile) els.planItemsFile.value = "";
+  if (els.planOpeningsFile) els.planOpeningsFile.value = "";
+  if (els.planAssumptionsFile) els.planAssumptionsFile.value = "";
+  logChange("PLAN_CLEARED", "План/Прогноз", "Плановые CSV очищены");
+  persistPlanAndRender(false);
+}
+
+function persistPlanAndRender(logSave = true) {
+  savePlanState(state.plan);
+  renderPlanTab();
+  renderAnalyticsTab();
+  if (logSave) {
+    logChange("PLAN_UPDATED", "План/Прогноз", "Обновлены параметры прогноза");
+  }
+}
+
+function renderPlanTab() {
+  if (!els.planScenarioSelect || !els.planProbabilityFilter || !els.planMonthTableBody || !els.planActivityTableBody) return;
+  ensurePlanScenarioSelection();
+
+  els.planScenarioSelect.innerHTML = getPlanScenarioOptions()
+    .map((scenario) => `<option value="${escapeHtml(scenario)}">${escapeHtml(scenario)}</option>`)
+    .join("");
+  els.planScenarioSelect.value = state.plan.selectedScenario;
+  els.planProbabilityFilter.value = state.plan.probabilityFilter;
+
+  const itemsFile = state.plan.sourceFiles.items
+    ? `${state.plan.sourceFiles.items}; строк: ${state.plan.items.length}`
+    : "не загружен.";
+  const openingsFile = state.plan.sourceFiles.openings
+    ? `${state.plan.sourceFiles.openings}; строк: ${state.plan.openings.length}`
+    : "не загружен.";
+  const assumptionsFile = state.plan.sourceFiles.assumptions
+    ? `${state.plan.sourceFiles.assumptions}; строк: ${state.plan.assumptions.length}`
+    : "не загружен.";
+
+  if (els.planItemsStatus) els.planItemsStatus.textContent = `plan_items: ${itemsFile}`;
+  if (els.planOpeningsStatus) els.planOpeningsStatus.textContent = `plan_opening_balance: ${openingsFile}`;
+  if (els.planAssumptionsStatus) els.planAssumptionsStatus.textContent = `plan_assumptions: ${assumptionsFile}`;
+
+  const forecast = buildPlanForecast(state.plan);
+  const assumption = getAssumptionByScenario(state.plan.assumptions, state.plan.selectedScenario);
+  if (els.planStatus) {
+    els.planStatus.textContent =
+      `Сценарий: ${state.plan.selectedScenario}. ` +
+      `Коэфф. поступлений: ${assumption.inflowFactor.toFixed(2)}; ` +
+      `коэфф. выбытий: ${assumption.outflowFactor.toFixed(2)}. ` +
+      `Строк в расчете: ${forecast.includedItems}.`;
+  }
+
+  renderPlanMetrics(forecast);
+  renderPlanMonthTable(forecast.monthRows);
+  renderPlanActivityTable(forecast.activityRows);
+}
+
+function renderPlanMetrics(forecast) {
+  if (!els.planMetrics) return;
+  const metrics = [
+    { label: "Месяцев в прогнозе", value: String(forecast.monthRows.length) },
+    { label: "Поступления (план)", value: formatMoney(forecast.totalInflow) },
+    { label: "Выбытия (план)", value: formatMoney(forecast.totalOutflow) },
+    { label: "Чистый поток", value: formatMoney(forecast.totalNet) },
+    { label: "Месяцев с риском", value: String(forecast.riskMonths) },
+  ];
+
+  els.planMetrics.innerHTML = metrics
+    .map(
+      (item) => `
+      <article class="metric">
+        <div class="label">${item.label}</div>
+        <div class="value">${item.value}</div>
+      </article>
+    `
+    )
+    .join("");
+}
+
+function renderPlanMonthTable(rows) {
+  if (!els.planMonthTableBody) return;
+  if (!rows || rows.length === 0) {
+    els.planMonthTableBody.innerHTML = `<tr><td colspan="7" class="empty">Нет данных для расчета прогноза.</td></tr>`;
+    return;
+  }
+
+  els.planMonthTableBody.innerHTML = rows
+    .map((row) => {
+      const riskLabel = row.risk ? "Риск кассового разрыва" : "ОК";
+      return `
+        <tr class="${row.risk ? "unresolved-row" : ""}">
+          <td>${escapeHtml(row.month)}</td>
+          <td>${row.openingBalance === null ? "н/д" : formatMoney(row.openingBalance)}</td>
+          <td>${formatMoney(row.inflow)}</td>
+          <td>${formatMoney(row.outflow)}</td>
+          <td>${formatMoney(row.net)}</td>
+          <td>${row.closingBalance === null ? "н/д" : formatMoney(row.closingBalance)}</td>
+          <td>${riskLabel}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderPlanActivityTable(rows) {
+  if (!els.planActivityTableBody) return;
+  if (!rows || rows.length === 0) {
+    els.planActivityTableBody.innerHTML = `<tr><td colspan="4" class="empty">Нет данных по видам деятельности.</td></tr>`;
+    return;
+  }
+
+  const body = rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(row.activity)}</td>
+        <td>${formatMoney(row.inflow)}</td>
+        <td>${formatMoney(row.outflow)}</td>
+        <td>${formatMoney(row.net)}</td>
+      </tr>
+    `
+    )
+    .join("");
+
+  const totalInflow = rows.reduce((sum, row) => sum + row.inflow, 0);
+  const totalOutflow = rows.reduce((sum, row) => sum + row.outflow, 0);
+  const totalNet = totalInflow - totalOutflow;
+  els.planActivityTableBody.innerHTML =
+    body +
+    `
+    <tr class="grand-total">
+      <td>Итого</td>
+      <td>${formatMoney(totalInflow)}</td>
+      <td>${formatMoney(totalOutflow)}</td>
+      <td>${formatMoney(totalNet)}</td>
+    </tr>
+  `;
+}
+
+function buildPlanForecast(planState) {
+  const assumption = getAssumptionByScenario(planState.assumptions, planState.selectedScenario);
+  const includedItems = getPlanItemsForScenario(planState.items, planState.selectedScenario, planState.probabilityFilter);
+  const inflowFactor = Number(assumption.inflowFactor) || 1;
+  const outflowFactor = Number(assumption.outflowFactor) || 1;
+
+  const monthMap = new Map();
+  const activityMap = new Map();
+
+  includedItems.forEach((item) => {
+    const month = normalizeMonthKey(item.month || item.date);
+    if (!month) return;
+
+    if (!monthMap.has(month)) {
+      monthMap.set(month, {
+        month,
+        openingBalance: null,
+        inflow: 0,
+        outflow: 0,
+        net: 0,
+        closingBalance: null,
+        risk: false,
+      });
+    }
+    const row = monthMap.get(month);
+    const isOutflow = normalizeText(item.type).includes("выбыт") || normalizeText(item.type).includes("расход");
+    const adjustedAmount = Math.abs(Number(item.amount) || 0) * (isOutflow ? outflowFactor : inflowFactor);
+    if (isOutflow) {
+      row.outflow += adjustedAmount;
+    } else {
+      row.inflow += adjustedAmount;
+    }
+
+    const activity = String(item.activity || "Не определено").trim() || "Не определено";
+    if (!activityMap.has(activity)) {
+      activityMap.set(activity, { activity, inflow: 0, outflow: 0, net: 0 });
+    }
+    const activityRow = activityMap.get(activity);
+    if (isOutflow) {
+      activityRow.outflow += adjustedAmount;
+    } else {
+      activityRow.inflow += adjustedAmount;
+    }
+  });
+
+  const openingByMonth = new Map();
+  (planState.openings || []).forEach((row) => {
+    const month = normalizeMonthKey(row.month);
+    const openingBalance = Number(row.openingBalance);
+    if (!month || !Number.isFinite(openingBalance)) return;
+    openingByMonth.set(month, (openingByMonth.get(month) || 0) + openingBalance);
+    if (!monthMap.has(month)) {
+      monthMap.set(month, {
+        month,
+        openingBalance: null,
+        inflow: 0,
+        outflow: 0,
+        net: 0,
+        closingBalance: null,
+        risk: false,
+      });
+    }
+  });
+
+  const monthRows = [...monthMap.values()].sort((a, b) => a.month.localeCompare(b.month));
+  let previousClosing = null;
+  monthRows.forEach((row) => {
+    const explicitOpening = openingByMonth.has(row.month) ? openingByMonth.get(row.month) : null;
+    row.openingBalance = Number.isFinite(explicitOpening) ? explicitOpening : previousClosing;
+    row.net = row.inflow - row.outflow;
+    row.closingBalance = Number.isFinite(row.openingBalance) ? row.openingBalance + row.net : null;
+    row.risk = Number.isFinite(row.closingBalance) ? row.closingBalance < 0 : false;
+    previousClosing = Number.isFinite(row.closingBalance) ? row.closingBalance : previousClosing;
+  });
+
+  const activityRows = [...activityMap.values()]
+    .map((row) => ({ ...row, net: row.inflow - row.outflow }))
+    .sort((a, b) => a.activity.localeCompare(b.activity, "ru"));
+
+  const totalInflow = monthRows.reduce((sum, row) => sum + row.inflow, 0);
+  const totalOutflow = monthRows.reduce((sum, row) => sum + row.outflow, 0);
+  const totalNet = totalInflow - totalOutflow;
+  const riskMonths = monthRows.filter((row) => row.risk).length;
+
+  return {
+    monthRows,
+    activityRows,
+    totalInflow,
+    totalOutflow,
+    totalNet,
+    riskMonths,
+    includedItems: includedItems.length,
+  };
+}
+
+function getPlanItemsForScenario(items, selectedScenario, probabilityFilter) {
+  const scenarioKey = normalizePlanScenario(selectedScenario);
+  return (items || []).filter((item) => {
+    const itemScenario = normalizePlanScenario(item.scenario || "base");
+    if (itemScenario && itemScenario !== scenarioKey) return false;
+    if (probabilityFilter === "high") {
+      return item.probability === "high";
+    }
+    if (probabilityFilter === "medium-high") {
+      return item.probability === "high" || item.probability === "medium";
+    }
+    return true;
+  });
+}
+
+function getPlanScenarioOptions() {
+  const fromAssumptions = (state.plan.assumptions || []).map((row) => normalizePlanScenario(row.scenario));
+  const fromItems = (state.plan.items || []).map((row) => normalizePlanScenario(row.scenario));
+  const combined = uniqueValues([...fromAssumptions, ...fromItems, "base"].filter(Boolean));
+  return combined.length > 0 ? combined : ["base"];
+}
+
+function ensurePlanScenarioSelection() {
+  const options = getPlanScenarioOptions();
+  const current = normalizePlanScenario(state.plan.selectedScenario);
+  state.plan.selectedScenario = options.includes(current) ? current : options[0];
+  const probability = String(state.plan.probabilityFilter || "all");
+  state.plan.probabilityFilter = ["all", "high", "medium-high"].includes(probability) ? probability : "all";
+}
+
+function getAssumptionByScenario(assumptions, scenario) {
+  const normalizedScenario = normalizePlanScenario(scenario);
+  const row = (assumptions || []).find((item) => normalizePlanScenario(item.scenario) === normalizedScenario);
+  if (row) {
+    return {
+      scenario: normalizePlanScenario(row.scenario),
+      inflowFactor: Number.isFinite(Number(row.inflowFactor)) ? Number(row.inflowFactor) : 1,
+      outflowFactor: Number.isFinite(Number(row.outflowFactor)) ? Number(row.outflowFactor) : 1,
+    };
+  }
+  return { scenario: normalizedScenario || "base", inflowFactor: 1, outflowFactor: 1 };
+}
+
+function parsePlanItemsCsv(text) {
+  const { rows, headerMap } = parsePlanCsvTable(text, {
+    month: ["month", "месяц"],
+    date: ["date", "дата"],
+    legalEntity: ["legal_entity", "юрлицо", "компания"],
+    bankAccount: ["bank_account", "счет", "банк"],
+    activity: ["activity", "вид деятельности"],
+    ddsArticle: ["dds_article", "article", "статья ддс", "статья"],
+    type: ["type", "группа", "операция"],
+    amount: ["amount", "сумма"],
+    probability: ["probability", "вероятность"],
+    scenario: ["scenario", "сценарий"],
+    comment: ["comment", "комментарий"],
+  }, ["type", "amount"]);
+
+  const parsed = rows
+    .map((cells) => {
+      const monthRaw = getCellByHeader(cells, headerMap, "month");
+      const dateRaw = getCellByHeader(cells, headerMap, "date");
+      const month = normalizeMonthKey(monthRaw || dateRaw);
+      const dateObj = parseFlexibleDate(dateRaw);
+      const type = resolvePlanType(getCellByHeader(cells, headerMap, "type"), getCellByHeader(cells, headerMap, "amount"));
+      const amount = parseAmount(getCellByHeader(cells, headerMap, "amount"));
+      if (!month || !Number.isFinite(amount)) return null;
+
+      return {
+        month,
+        date: dateObj ? toDateInputValue(dateObj) : "",
+        legalEntity: String(getCellByHeader(cells, headerMap, "legalEntity") || "").trim(),
+        bankAccount: String(getCellByHeader(cells, headerMap, "bankAccount") || "").trim(),
+        activity: String(getCellByHeader(cells, headerMap, "activity") || "").trim() || "Не определено",
+        ddsArticle: String(getCellByHeader(cells, headerMap, "ddsArticle") || "").trim(),
+        type,
+        amount: Math.abs(amount),
+        probability: normalizePlanProbability(getCellByHeader(cells, headerMap, "probability")),
+        scenario: normalizePlanScenario(getCellByHeader(cells, headerMap, "scenario") || "base"),
+        comment: String(getCellByHeader(cells, headerMap, "comment") || "").trim(),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const byMonth = a.month.localeCompare(b.month);
+      if (byMonth !== 0) return byMonth;
+      return String(a.date || "").localeCompare(String(b.date || ""));
+    });
+
+  if (parsed.length === 0) {
+    throw new Error("В `plan_items` не найдены валидные строки (month/type/amount).");
+  }
+  return parsed;
+}
+
+function parsePlanOpeningsCsv(text) {
+  const { rows, headerMap } = parsePlanCsvTable(text, {
+    month: ["month", "месяц"],
+    legalEntity: ["legal_entity", "юрлицо", "компания"],
+    bankAccount: ["bank_account", "счет", "банк"],
+    openingBalance: ["opening_balance", "начало", "остаток на начало", "balance_start"],
+  }, ["month", "openingBalance"]);
+
+  const parsed = rows
+    .map((cells) => {
+      const month = normalizeMonthKey(getCellByHeader(cells, headerMap, "month"));
+      const openingBalance = parseAmount(getCellByHeader(cells, headerMap, "openingBalance"));
+      if (!month || !Number.isFinite(openingBalance)) return null;
+      return {
+        month,
+        legalEntity: String(getCellByHeader(cells, headerMap, "legalEntity") || "").trim(),
+        bankAccount: String(getCellByHeader(cells, headerMap, "bankAccount") || "").trim(),
+        openingBalance,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.month.localeCompare(b.month));
+
+  if (parsed.length === 0) {
+    throw new Error("В `plan_opening_balance` не найдены валидные строки (month/opening_balance).");
+  }
+  return parsed;
+}
+
+function parsePlanAssumptionsCsv(text) {
+  const { rows, headerMap } = parsePlanCsvTable(text, {
+    scenario: ["scenario", "сценарий"],
+    inflowFactor: ["inflow_factor", "коэф поступлений", "коэффициент поступлений", "inflow"],
+    outflowFactor: ["outflow_factor", "коэф выбытий", "коэффициент выбытий", "outflow"],
+  }, ["scenario", "inflowFactor", "outflowFactor"]);
+
+  const byScenario = new Map();
+  rows.forEach((cells) => {
+    const scenario = normalizePlanScenario(getCellByHeader(cells, headerMap, "scenario") || "base");
+    const inflowFactor = parseAmount(getCellByHeader(cells, headerMap, "inflowFactor"));
+    const outflowFactor = parseAmount(getCellByHeader(cells, headerMap, "outflowFactor"));
+    if (!scenario || !Number.isFinite(inflowFactor) || !Number.isFinite(outflowFactor)) return;
+    byScenario.set(scenario, {
+      scenario,
+      inflowFactor,
+      outflowFactor,
+    });
+  });
+
+  const parsed = [...byScenario.values()].sort((a, b) => a.scenario.localeCompare(b.scenario, "ru"));
+  if (parsed.length === 0) {
+    throw new Error("В `plan_assumptions` не найдены валидные строки (scenario/inflow_factor/outflow_factor).");
+  }
+  return parsed;
+}
+
+function parsePlanCsvTable(text, columnsConfig, requiredKeys = []) {
+  const clean = String(text || "").replace(/^\uFEFF/, "").trim();
+  if (!clean) throw new Error("CSV пустой.");
+  const delimiter = detectCsvDelimiter(clean);
+  const rows = parseCsv(clean, delimiter).filter((cells) => cells.some((cell) => String(cell || "").trim() !== ""));
+  if (rows.length < 2) throw new Error("В CSV нет строк данных.");
+
+  const headers = (rows[0] || []).map((cell) => normalizeText(cell).replace(/[_\s]+/g, " ").trim());
+  const headerMap = {};
+  Object.entries(columnsConfig).forEach(([key, aliases]) => {
+    const index = findColumnByAliases(headers, aliases || []);
+    if (index >= 0) {
+      headerMap[key] = index;
+    }
+  });
+
+  const missing = requiredKeys.filter((key) => !Number.isInteger(headerMap[key]));
+  if (missing.length > 0) {
+    throw new Error(`Не найдены обязательные колонки: ${missing.join(", ")}`);
+  }
+
+  return {
+    rows: rows.slice(1),
+    headerMap,
+  };
+}
+
+function findColumnByAliases(headers, aliases) {
+  if (!Array.isArray(headers) || headers.length === 0) return -1;
+  const normalizedAliases = aliases.map((item) => normalizeText(item).replace(/[_\s]+/g, " ").trim()).filter(Boolean);
+  for (let i = 0; i < headers.length; i += 1) {
+    const header = headers[i];
+    if (!header) continue;
+    if (normalizedAliases.some((alias) => header === alias || header.includes(alias) || alias.includes(header))) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function getCellByHeader(cells, headerMap, key) {
+  const idx = Number(headerMap[key]);
+  if (!Number.isInteger(idx) || idx < 0) return "";
+  return String(cells[idx] || "").trim();
+}
+
+function resolvePlanType(typeRaw, amountRaw) {
+  const type = normalizeText(typeRaw);
+  if (type.includes("выбыт") || type.includes("расход")) return "Выбытие";
+  if (type.includes("поступ") || type.includes("доход")) return "Поступление";
+
+  const amount = parseAmount(amountRaw);
+  if (Number.isFinite(amount) && amount < 0) return "Выбытие";
+  return "Поступление";
+}
+
+function normalizePlanScenario(value) {
+  return String(value || "base")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zа-я0-9_-]/gi, "") || "base";
+}
+
+function normalizePlanProbability(value) {
+  const normalized = normalizeText(value);
+  if (normalized.includes("high") || normalized.includes("выс")) return "high";
+  if (normalized.includes("low") || normalized.includes("низ")) return "low";
+  if (normalized.includes("med") || normalized.includes("сред")) return "medium";
+  return "medium";
+}
+
+function downloadPlanItemsTemplateCsv() {
+  triggerDownload(new Blob([SAMPLE_PLAN_ITEMS], { type: "text/csv;charset=utf-8;" }), "plan_items_template.csv");
+}
+
+function downloadPlanOpeningsTemplateCsv() {
+  triggerDownload(
+    new Blob([SAMPLE_PLAN_OPENINGS], { type: "text/csv;charset=utf-8;" }),
+    "plan_opening_balance_template.csv"
+  );
+}
+
+function downloadPlanAssumptionsTemplateCsv() {
+  triggerDownload(
+    new Blob([SAMPLE_PLAN_ASSUMPTIONS], { type: "text/csv;charset=utf-8;" }),
+    "plan_assumptions_template.csv"
+  );
+}
+
+function downloadPlanForecastCsv() {
+  if (!requirePermission("plan.export", "Недостаточно прав: роль не позволяет выгружать прогноз.")) return;
+  const forecast = buildPlanForecast(state.plan);
+  if (forecast.monthRows.length === 0) {
+    if (els.planStatus) els.planStatus.textContent = "Нет данных для выгрузки прогноза.";
+    return;
+  }
+
+  const headers = ["Месяц", "Начало месяца", "Поступления", "Выбытия", "Чистый поток", "Конец месяца", "Риск"];
+  const lines = forecast.monthRows.map((row) => [
+    row.month,
+    row.openingBalance === null ? "" : formatNumberForCsv(row.openingBalance),
+    formatNumberForCsv(row.inflow),
+    formatNumberForCsv(row.outflow),
+    formatNumberForCsv(row.net),
+    row.closingBalance === null ? "" : formatNumberForCsv(row.closingBalance),
+    row.risk ? "RISK" : "OK",
+  ]);
+  const csv = [headers, ...lines]
+    .map((line) => line.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(";"))
+    .join("\n");
+  triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), "dds-plan-forecast.csv");
+}
+
+function bindAnalyticsEvents() {
+  if (!els.analyticsSettingsForm) return;
+
+  const onParamChange = () => {
+    applyAnalyticsSettingsFromInputs();
+    saveAnalyticsState(state.analytics);
+    renderAnalyticsTab();
+  };
+  els.analyticsDateFrom?.addEventListener("change", onParamChange);
+  els.analyticsDateTo?.addEventListener("change", onParamChange);
+  els.analyticsCompareMode?.addEventListener("change", onParamChange);
+  els.analyticsForecastHorizon?.addEventListener("change", onParamChange);
+  els.analyticsForecastMode?.addEventListener("change", onParamChange);
+  els.analyticsScenario?.addEventListener("change", onParamChange);
+  els.analyticsSafeBalanceMode?.addEventListener("change", onParamChange);
+  els.analyticsToggleFindingsBtn?.addEventListener("click", () => {
+    state.analytics.showAllFindings = !state.analytics.showAllFindings;
+    saveAnalyticsState(state.analytics);
+    renderAnalyticsTab();
+  });
+
+  els.analyticsApplyBtn?.addEventListener("click", () => {
+    if (!requirePermission("analytics.settings", "Недостаточно прав: роль не позволяет менять параметры аналитики.")) return;
+    applyAnalyticsSettingsFromInputs();
+    saveAnalyticsState(state.analytics);
+    logChange("ANALYTICS_SETTINGS_UPDATED", "Аналитика", "Параметры аналитики обновлены");
+    renderAnalyticsTab();
+  });
+
+  els.analyticsSyncWithReportBtn?.addEventListener("click", () => {
+    if (!requirePermission("analytics.settings", "Недостаточно прав: роль не позволяет менять параметры аналитики.")) return;
+    syncAnalyticsPeriodWithReport();
+    saveAnalyticsState(state.analytics);
+    renderAnalyticsTab();
+  });
+
+  els.analyticsExportBtn?.addEventListener("click", exportAnalyticsCsv);
+  els.analyticsPrintBtn?.addEventListener("click", () => {
+    if (!requirePermission("analytics.export", "Недостаточно прав: роль не позволяет печатать аналитику.")) return;
+    window.print();
+  });
+}
+
+function syncAnalyticsPeriodWithReport() {
+  const from = String(els.dateFromInput?.value || "").trim();
+  const to = String(els.dateToInput?.value || "").trim();
+  if (from) state.analytics.dateFrom = from;
+  if (to) state.analytics.dateTo = to;
+  fillAnalyticsSettingsInputs();
+}
+
+function applyAnalyticsSettingsFromInputs() {
+  state.analytics.dateFrom = String(els.analyticsDateFrom?.value || "").trim();
+  state.analytics.dateTo = String(els.analyticsDateTo?.value || "").trim();
+  state.analytics.compareMode = normalizeAnalyticsCompareMode(els.analyticsCompareMode?.value);
+  state.analytics.forecastHorizon = normalizeIntInRange(els.analyticsForecastHorizon?.value, 30, 7, 90);
+  state.analytics.forecastMode = normalizeAnalyticsForecastMode(els.analyticsForecastMode?.value);
+  state.analytics.scenario = normalizeAnalyticsScenario(els.analyticsScenario?.value);
+  state.analytics.openingBalance = normalizeMoneyInput(els.analyticsOpeningBalance?.value, 0);
+  state.analytics.safeBalanceMode = normalizeSafeBalanceMode(els.analyticsSafeBalanceMode?.value);
+  state.analytics.safeBalanceFixed = normalizeMoneyInput(els.analyticsSafeBalanceFixed?.value, 20000);
+  state.analytics.safeBalancePercent = normalizeIntInRange(els.analyticsSafeBalancePercent?.value, 30, 1, 500);
+  state.analytics.top1Threshold = normalizeIntInRange(els.analyticsTop1Threshold?.value, 40, 1, 100);
+  state.analytics.top3Threshold = normalizeIntInRange(els.analyticsTop3Threshold?.value, 70, 1, 100);
+  state.analytics.expenseShareThreshold = normalizeIntInRange(els.analyticsExpenseShareThreshold?.value, 30, 1, 100);
+  state.analytics.investmentLoadThreshold = normalizeIntInRange(els.analyticsInvestmentLoadThreshold?.value, 25, 1, 100);
+  state.analytics.outflowSurgeThreshold = normalizeIntInRange(els.analyticsOutflowSurgeThreshold?.value, 30, 1, 300);
+  state.analytics.outflowSurgeLookback = normalizeIntInRange(els.analyticsOutflowSurgeLookback?.value, 3, 1, 12);
+  state.analytics.scenarioOptimisticInflow = normalizeIntInRange(els.analyticsScenarioOptimisticInflow?.value, 10, 0, 200);
+  state.analytics.scenarioOptimisticOutflow = normalizeIntInRange(els.analyticsScenarioOptimisticOutflow?.value, 5, 0, 100);
+  state.analytics.scenarioConservativeInflow = normalizeIntInRange(els.analyticsScenarioConservativeInflow?.value, 15, 0, 100);
+  state.analytics.scenarioConservativeOutflow = normalizeIntInRange(els.analyticsScenarioConservativeOutflow?.value, 10, 0, 200);
+}
+
+function fillAnalyticsSettingsInputs() {
+  if (!els.analyticsSettingsForm) return;
+  els.analyticsDateFrom.value = state.analytics.dateFrom || "";
+  els.analyticsDateTo.value = state.analytics.dateTo || "";
+  els.analyticsCompareMode.value = normalizeAnalyticsCompareMode(state.analytics.compareMode);
+  els.analyticsForecastHorizon.value = String(normalizeIntInRange(state.analytics.forecastHorizon, 30, 7, 90));
+  els.analyticsForecastMode.value = normalizeAnalyticsForecastMode(state.analytics.forecastMode);
+  els.analyticsScenario.value = normalizeAnalyticsScenario(state.analytics.scenario);
+  els.analyticsOpeningBalance.value = formatNumberForInput(Number(state.analytics.openingBalance) || 0);
+  els.analyticsSafeBalanceFixed.value = formatNumberForInput(Number(state.analytics.safeBalanceFixed) || 0);
+  els.analyticsSafeBalancePercent.value = String(normalizeIntInRange(state.analytics.safeBalancePercent, 30, 1, 500));
+  els.analyticsSafeBalanceMode.value = normalizeSafeBalanceMode(state.analytics.safeBalanceMode);
+  els.analyticsTop1Threshold.value = String(normalizeIntInRange(state.analytics.top1Threshold, 40, 1, 100));
+  els.analyticsTop3Threshold.value = String(normalizeIntInRange(state.analytics.top3Threshold, 70, 1, 100));
+  els.analyticsExpenseShareThreshold.value = String(normalizeIntInRange(state.analytics.expenseShareThreshold, 30, 1, 100));
+  els.analyticsInvestmentLoadThreshold.value = String(normalizeIntInRange(state.analytics.investmentLoadThreshold, 25, 1, 100));
+  els.analyticsOutflowSurgeThreshold.value = String(normalizeIntInRange(state.analytics.outflowSurgeThreshold, 30, 1, 300));
+  els.analyticsOutflowSurgeLookback.value = String(normalizeIntInRange(state.analytics.outflowSurgeLookback, 3, 1, 12));
+  els.analyticsScenarioOptimisticInflow.value = String(normalizeIntInRange(state.analytics.scenarioOptimisticInflow, 10, 0, 200));
+  els.analyticsScenarioOptimisticOutflow.value = String(normalizeIntInRange(state.analytics.scenarioOptimisticOutflow, 5, 0, 100));
+  els.analyticsScenarioConservativeInflow.value = String(
+    normalizeIntInRange(state.analytics.scenarioConservativeInflow, 15, 0, 100)
+  );
+  els.analyticsScenarioConservativeOutflow.value = String(
+    normalizeIntInRange(state.analytics.scenarioConservativeOutflow, 10, 0, 200)
+  );
+}
+
+function renderAnalyticsTab() {
+  if (!els.analyticsTab || !els.analyticsSummaryMetrics) return;
+
+  if ((!state.analytics.dateFrom || !state.analytics.dateTo) && (els.dateFromInput?.value || els.dateToInput?.value)) {
+    syncAnalyticsPeriodWithReport();
+    saveAnalyticsState(state.analytics);
+  }
+  fillAnalyticsSettingsInputs();
+
+  const period = resolveAnalyticsPeriod();
+  const articleMap = buildArticleMap(state.articles);
+  const currentOps = getOperationsByPeriod(period.from, period.to, articleMap);
+  const previousPeriod = getPreviousPeriod(period.from, period.to, state.analytics.compareMode);
+  const previousOps = getOperationsByPeriod(previousPeriod.from, previousPeriod.to, articleMap);
+  const allOps = state.operationsRaw.map((row) => enrichOperation(row, articleMap));
+  const averageMonthlyOutflow = computeAverageMonthlyOutflow(allOps, state.analytics.outflowSurgeLookback, period.to);
+  const safeBalance = resolveSafeBalance(state.analytics, averageMonthlyOutflow);
+
+  const summary = buildFactSummary(currentOps, Number(state.analytics.openingBalance) || 0, safeBalance);
+  const previousSummary = buildFactSummary(previousOps, Number(state.analytics.openingBalance) || 0, safeBalance);
+  const structure = buildStructureAnalysis(currentOps);
+  const comparison = buildComparisonSummary(summary, previousSummary);
+  const forecast = buildForecastSummary({
+    period,
+    currentSummary: summary,
+    allOps,
+    safeBalance,
+    settings: state.analytics,
+  });
+  const findings = buildAnalyticsFindings({
+    summary,
+    safeBalance,
+    structure,
+    comparison,
+    forecast,
+    settings: state.analytics,
+  });
+  const recommendations = uniqueValues(findings.map((item) => item.recommendation).filter(Boolean));
+
+  renderAnalyticsSummaryMetrics(summary, safeBalance, forecast);
+  renderStructureTables(structure);
+  renderComparisonTable(comparison);
+  renderForecastTable(forecast.rows);
+  renderFindings(findings);
+  renderRecommendations(recommendations);
+
+  if (els.analyticsStatus) {
+    els.analyticsStatus.textContent = `Период: ${toDateInputValue(period.from)} - ${toDateInputValue(period.to)}. ` +
+      `Операций в периоде: ${summary.operationCount}. Тех. операции: ${summary.technicalCount}. ` +
+      `Режим прогноза: ${forecast.modeLabel}.`;
+  }
+
+  state.analytics.latest = {
+    period,
+    previousPeriod,
+    summary,
+    previousSummary,
+    structure,
+    comparison,
+    forecast,
+    findings,
+    recommendations,
+    safeBalance,
+  };
+}
+
+function resolveAnalyticsPeriod() {
+  let from = parseFlexibleDate(state.analytics.dateFrom || "");
+  let to = parseFlexibleDate(state.analytics.dateTo || "");
+
+  if (!from && els.dateFromInput?.value) from = parseFlexibleDate(els.dateFromInput.value);
+  if (!to && els.dateToInput?.value) to = parseFlexibleDate(els.dateToInput.value);
+
+  if ((!from || !to) && state.operationsRaw.length > 0) {
+    const sorted = state.operationsRaw
+      .map((row) => row.dateObj)
+      .filter((date) => date instanceof Date && !Number.isNaN(date.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime());
+    if (!from && sorted[0]) from = startOfDay(sorted[0]);
+    if (!to && sorted.at(-1)) to = startOfDay(sorted.at(-1));
+  }
+
+  if (!from) from = startOfDay(new Date());
+  if (!to) to = startOfDay(new Date());
+  from = startOfDay(from);
+  to = startOfDay(to);
+  if (from > to) {
+    const tmp = from;
+    from = to;
+    to = tmp;
+  }
+  return { from, to };
+}
+
+function getOperationsByPeriod(from, to, articleMap) {
+  const fromStart = startOfDay(from);
+  const toEnd = endOfDay(to);
+  return state.operationsRaw
+    .map((row) => enrichOperation(row, articleMap))
+    .filter((op) => op.dateObj >= fromStart && op.dateObj <= toEnd);
+}
+
+function getPreviousPeriod(from, to, compareModeRaw) {
+  const compareMode = normalizeAnalyticsCompareMode(compareModeRaw);
+  const fromDate = startOfDay(from);
+  const toDate = startOfDay(to);
+  const lengthDays = Math.max(1, Math.round((toDate.getTime() - fromDate.getTime()) / 86400000) + 1);
+
+  if (compareMode === "week") {
+    return { from: addDays(fromDate, -7), to: addDays(toDate, -7) };
+  }
+  if (compareMode === "month") {
+    return { from: addMonths(fromDate, -1), to: addMonths(toDate, -1) };
+  }
+  if (compareMode === "quarter") {
+    return { from: addMonths(fromDate, -3), to: addMonths(toDate, -3) };
+  }
+
+  const previousTo = addDays(fromDate, -1);
+  const previousFrom = addDays(previousTo, -(lengthDays - 1));
+  return { from: previousFrom, to: previousTo };
+}
+
+function buildFactSummary(operations, openingBalance, safeBalance) {
+  const summary = {
+    openingBalance: Number(openingBalance) || 0,
+    inflow: 0,
+    outflow: 0,
+    net: 0,
+    closingBalance: 0,
+    operatingFlow: 0,
+    investingFlow: 0,
+    financingFlow: 0,
+    technicalFlow: 0,
+    operationCount: operations.length,
+    technicalCount: 0,
+    statusKey: "normal",
+    statusLabel: "Норма",
+  };
+
+  const flowByClass = {
+    operating: { in: 0, out: 0 },
+    investing: { in: 0, out: 0 },
+    financing: { in: 0, out: 0 },
+    technical: { in: 0, out: 0 },
+  };
+
+  operations.forEach((op) => {
+    const cls = classifyCashflowActivity(op.activity);
+    const amount = Number(op.amount) || 0;
+    const isInflow = op.direction === "Поступление";
+    if (isInflow) flowByClass[cls].in += amount;
+    else flowByClass[cls].out += amount;
+  });
+
+  summary.technicalCount = operations.filter((op) => classifyCashflowActivity(op.activity) === "technical").length;
+  summary.technicalFlow = flowByClass.technical.in - flowByClass.technical.out;
+
+  summary.inflow = flowByClass.operating.in + flowByClass.investing.in + flowByClass.financing.in;
+  summary.outflow = flowByClass.operating.out + flowByClass.investing.out + flowByClass.financing.out;
+  summary.net = summary.inflow - summary.outflow;
+  summary.closingBalance = summary.openingBalance + summary.net;
+
+  summary.operatingFlow = flowByClass.operating.in - flowByClass.operating.out;
+  summary.investingFlow = flowByClass.investing.in - flowByClass.investing.out;
+  summary.financingFlow = flowByClass.financing.in - flowByClass.financing.out;
+
+  if (summary.closingBalance <= 0) {
+    summary.statusKey = "gap";
+    summary.statusLabel = "Кассовый разрыв";
+  } else if (summary.closingBalance <= safeBalance) {
+    summary.statusKey = "risk";
+    summary.statusLabel = "Риск";
+  } else if (summary.closingBalance <= safeBalance * 1.25) {
+    summary.statusKey = "attention";
+    summary.statusLabel = "Зона внимания";
+  }
+
+  return summary;
+}
+
+function classifyCashflowActivity(activityRaw) {
+  if (isTechnicalActivity(activityRaw)) return "technical";
+  const activity = normalizeText(activityRaw);
+  if (activity.startsWith("01") || activity.includes("операцион")) return "operating";
+  if (activity.startsWith("02") || activity.includes("инвестицион")) return "investing";
+  if (activity.startsWith("03") || activity.includes("финансов")) return "financing";
+  return "financing";
+}
+
+function buildStructureAnalysis(operations) {
+  const inflowByArticle = new Map();
+  const outflowByArticle = new Map();
+  const inflowByCounterparty = new Map();
+  const outflowByCounterparty = new Map();
+  let totalInflow = 0;
+  let totalOutflow = 0;
+
+  operations.forEach((op) => {
+    if (classifyCashflowActivity(op.activity) === "technical") return;
+    const isInflow = op.direction === "Поступление";
+    const amount = Math.abs(Number(op.amount) || 0);
+    const article = op.article || UNKNOWN_ARTICLE;
+    const counterparty = String(op.counterparty || "").trim() || "Без контрагента";
+
+    if (isInflow) {
+      totalInflow += amount;
+      inflowByArticle.set(article, (inflowByArticle.get(article) || 0) + amount);
+      inflowByCounterparty.set(counterparty, (inflowByCounterparty.get(counterparty) || 0) + amount);
+    } else {
+      totalOutflow += amount;
+      outflowByArticle.set(article, (outflowByArticle.get(article) || 0) + amount);
+      outflowByCounterparty.set(counterparty, (outflowByCounterparty.get(counterparty) || 0) + amount);
+    }
+  });
+
+  return {
+    totalInflow,
+    totalOutflow,
+    inflowTopArticles: buildTopShareRows(inflowByArticle, totalInflow, 5),
+    outflowTopArticles: buildTopShareRows(outflowByArticle, totalOutflow, 5),
+    inflowTopCounterparties: buildTopShareRows(inflowByCounterparty, totalInflow, 5),
+    outflowTopCounterparties: buildTopShareRows(outflowByCounterparty, totalOutflow, 5),
+    inflowTop1Share: getTopShare(inflowByArticle, totalInflow, 1),
+    inflowTop3Share: getTopShare(inflowByCounterparty, totalInflow, 3),
+    outflowTop1Share: getTopShare(outflowByArticle, totalOutflow, 1),
+  };
+}
+
+function buildTopShareRows(map, total, limit) {
+  return [...map.entries()]
+    .map(([name, value]) => ({
+      name,
+      amount: Number(value) || 0,
+      share: total > 0 ? ((Number(value) || 0) / total) * 100 : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, limit);
+}
+
+function getTopShare(map, total, count) {
+  if (!total || total <= 0) return 0;
+  const topSum = [...map.values()]
+    .map((value) => Number(value) || 0)
+    .sort((a, b) => b - a)
+    .slice(0, count)
+    .reduce((sum, value) => sum + value, 0);
+  return (topSum / total) * 100;
+}
+
+function buildComparisonSummary(current, previous) {
+  const rows = [
+    ["Поступления", current.inflow, previous.inflow],
+    ["Выплаты", current.outflow, previous.outflow],
+    ["Чистый денежный поток", current.net, previous.net],
+    ["Операционный поток", current.operatingFlow, previous.operatingFlow],
+    ["Конечный остаток", current.closingBalance, previous.closingBalance],
+  ];
+
+  return rows.map(([label, currentValue, previousValue]) => {
+    const delta = currentValue - previousValue;
+    const deltaPct = previousValue === 0 ? null : (delta / Math.abs(previousValue)) * 100;
+    return {
+      label,
+      currentValue,
+      previousValue,
+      delta,
+      deltaPct,
+    };
+  });
+}
+
+function buildForecastSummary({ period, currentSummary, allOps, safeBalance, settings }) {
+  const startDate = addDays(period.to, 1);
+  const horizon = normalizeIntInRange(settings.forecastHorizon, 30, 7, 90);
+  const scenarioFactors = resolveScenarioFactors(settings);
+  const normalizedMode = normalizeAnalyticsForecastMode(settings.forecastMode);
+
+  let modeUsed = normalizedMode;
+  let dailyRows = [];
+
+  if (normalizedMode === "plan") {
+    dailyRows = buildPlannedForecastDailyRows(startDate, horizon, settings.scenario, scenarioFactors);
+    if (dailyRows.length === 0) {
+      modeUsed = "stat";
+      dailyRows = buildStatisticalForecastDailyRows(startDate, horizon, allOps, scenarioFactors);
+    }
+  } else {
+    dailyRows = buildStatisticalForecastDailyRows(startDate, horizon, allOps, scenarioFactors);
+  }
+
+  if (dailyRows.length === 0) {
+    dailyRows = Array.from({ length: horizon }, (_, index) => ({
+      date: addDays(startDate, index),
+      inflow: 0,
+      outflow: 0,
+    }));
+  }
+
+  const rows = [];
+  let opening = Number(currentSummary.closingBalance) || 0;
+  dailyRows.forEach((dayRow) => {
+    const inflow = Math.max(0, Number(dayRow.inflow) || 0);
+    const outflow = Math.max(0, Number(dayRow.outflow) || 0);
+    const net = inflow - outflow;
+    const closing = opening + net;
+    const risk = resolveRiskStatus(closing, safeBalance);
+    rows.push({
+      period: toDateInputValue(dayRow.date),
+      openingBalance: opening,
+      inflow,
+      outflow,
+      net,
+      closingBalance: closing,
+      statusKey: risk.key,
+      statusLabel: risk.label,
+      comment: risk.comment,
+    });
+    opening = closing;
+  });
+
+  const firstGap = rows.find((row) => row.statusKey === "gap") || null;
+  const firstBelowSafe =
+    rows.find((row) => row.statusKey === "risk" || row.statusKey === "attention" || row.statusKey === "gap") || null;
+  const forecastOutflow = rows.reduce((sum, row) => sum + row.outflow, 0);
+  const averageMonthlyOutflow = computeAverageMonthlyOutflow(allOps, settings.outflowSurgeLookback, period.to);
+  const monthlyEquivalentOutflow = (forecastOutflow / Math.max(1, horizon)) * 30;
+  const outflowSurgePct =
+    averageMonthlyOutflow > 0 ? ((monthlyEquivalentOutflow - averageMonthlyOutflow) / averageMonthlyOutflow) * 100 : 0;
+
+  return {
+    rows,
+    modeUsed,
+    modeLabel: modeUsed === "plan" ? "Плановый" : normalizedMode === "plan" ? "Статистический (fallback)" : "Статистический",
+    firstGap,
+    firstBelowSafe,
+    safeBalance,
+    totalInflow: rows.reduce((sum, row) => sum + row.inflow, 0),
+    totalOutflow: forecastOutflow,
+    totalNet: rows.reduce((sum, row) => sum + row.net, 0),
+    endingBalance: rows.length > 0 ? rows[rows.length - 1].closingBalance : currentSummary.closingBalance,
+    outflowSurgePct,
+  };
+}
+
+function buildPlannedForecastDailyRows(startDate, horizon, scenarioRaw, scenarioFactors) {
+  const endDate = addDays(startDate, horizon - 1);
+  const scenarioPrimary = mapAnalyticsScenarioToPlanScenario(scenarioRaw);
+  const scenarioCandidates = [scenarioPrimary];
+  if (scenarioPrimary === "conservative") scenarioCandidates.push("pessimistic");
+  if (!scenarioCandidates.includes("base")) scenarioCandidates.push("base");
+
+  let plannedItems = [];
+  scenarioCandidates.some((scenarioName) => {
+    const rows = (state.plan.items || []).filter((item) => normalizePlanScenario(item.scenario || "base") === scenarioName);
+    if (rows.length > 0) {
+      plannedItems = rows;
+      return true;
+    }
+    return false;
+  });
+
+  if (plannedItems.length === 0) return [];
+
+  const planScenarioAssumption = getAssumptionByScenario(state.plan.assumptions || [], scenarioPrimary);
+  const inflowFactor = scenarioFactors.inflow * (Number(planScenarioAssumption.inflowFactor) || 1);
+  const outflowFactor = scenarioFactors.outflow * (Number(planScenarioAssumption.outflowFactor) || 1);
+
+  const byDate = new Map();
+  plannedItems.forEach((item) => {
+    const dateObj = parseFlexibleDate(item.date || "") || parseFlexibleDate(`${item.month}-01`);
+    if (!dateObj) return;
+    const day = startOfDay(dateObj);
+    if (day < startDate || day > endDate) return;
+    const key = toDateInputValue(day);
+    if (!byDate.has(key)) byDate.set(key, { date: day, inflow: 0, outflow: 0 });
+    const bucket = byDate.get(key);
+    const amount = Math.abs(Number(item.amount) || 0);
+    const isOutflow = normalizeText(item.type).includes("выбыт") || normalizeText(item.type).includes("расход");
+    if (isOutflow) bucket.outflow += amount * outflowFactor;
+    else bucket.inflow += amount * inflowFactor;
+  });
+
+  return [...byDate.values()].sort((a, b) => a.date.getTime() - b.date.getTime());
+}
+
+function buildStatisticalForecastDailyRows(startDate, horizon, allOps, scenarioFactors) {
+  const lookbackDays = Math.max(30, Math.min(120, horizon * 3));
+  const lookbackStart = addDays(startDate, -lookbackDays);
+  const historyOps = (allOps || []).filter((op) => {
+    if (classifyCashflowActivity(op.activity) === "technical") return false;
+    return op.dateObj >= lookbackStart && op.dateObj < startDate;
+  });
+
+  const weekdayStats = buildWeekdayCashflowStats(historyOps, lookbackStart, addDays(startDate, -1));
+  const globalDays = Math.max(1, lookbackDays);
+  const globalInflow = historyOps
+    .filter((op) => op.direction === "Поступление")
+    .reduce((sum, op) => sum + op.amount, 0) / globalDays;
+  const globalOutflow = historyOps
+    .filter((op) => op.direction === "Выбытие")
+    .reduce((sum, op) => sum + op.amount, 0) / globalDays;
+
+  return Array.from({ length: horizon }, (_, index) => {
+    const date = addDays(startDate, index);
+    const weekday = date.getDay();
+    const dayStat = weekdayStats[weekday] || { inflow: 0, outflow: 0 };
+    const inflowBase = dayStat.inflow > 0 ? dayStat.inflow : globalInflow;
+    const outflowBase = dayStat.outflow > 0 ? dayStat.outflow : globalOutflow;
+    return {
+      date,
+      inflow: inflowBase * scenarioFactors.inflow,
+      outflow: outflowBase * scenarioFactors.outflow,
+    };
+  });
+}
+
+function buildWeekdayCashflowStats(historyOps, from, to) {
+  const stats = Array.from({ length: 7 }, () => ({ dayCount: 0, inflow: 0, outflow: 0 }));
+  let cursor = startOfDay(from);
+  const end = startOfDay(to);
+  while (cursor <= end) {
+    const weekday = cursor.getDay();
+    stats[weekday].dayCount += 1;
+    cursor = addDays(cursor, 1);
+  }
+
+  historyOps.forEach((op) => {
+    const weekday = op.dateObj.getDay();
+    if (op.direction === "Поступление") stats[weekday].inflow += op.amount;
+    else stats[weekday].outflow += op.amount;
+  });
+
+  return stats.map((item) => ({
+    inflow: item.dayCount > 0 ? item.inflow / item.dayCount : 0,
+    outflow: item.dayCount > 0 ? item.outflow / item.dayCount : 0,
+  }));
+}
+
+function resolveScenarioFactors(settings) {
+  const scenario = normalizeAnalyticsScenario(settings.scenario);
+  if (scenario === "optimistic") {
+    return {
+      inflow: 1 + normalizeIntInRange(settings.scenarioOptimisticInflow, 10, 0, 200) / 100,
+      outflow: Math.max(0, 1 - normalizeIntInRange(settings.scenarioOptimisticOutflow, 5, 0, 100) / 100),
+    };
+  }
+  if (scenario === "conservative") {
+    return {
+      inflow: Math.max(0, 1 - normalizeIntInRange(settings.scenarioConservativeInflow, 15, 0, 100) / 100),
+      outflow: 1 + normalizeIntInRange(settings.scenarioConservativeOutflow, 10, 0, 200) / 100,
+    };
+  }
+  return { inflow: 1, outflow: 1 };
+}
+
+function resolveSafeBalance(settings, averageMonthlyOutflow) {
+  const safeMode = normalizeSafeBalanceMode(settings.safeBalanceMode);
+  if (safeMode === "percent_outflow") {
+    const percent = normalizeIntInRange(settings.safeBalancePercent, 30, 1, 500);
+    return (Number(averageMonthlyOutflow) || 0) * (percent / 100);
+  }
+  return Number(settings.safeBalanceFixed) || 0;
+}
+
+function resolveRiskStatus(closingBalance, safeBalance) {
+  if (closingBalance <= 0) {
+    return {
+      key: "gap",
+      label: "Кассовый разрыв",
+      comment: `Дефицит ${formatMoney(Math.abs(closingBalance))}`,
+    };
+  }
+  if (closingBalance <= safeBalance) {
+    return {
+      key: "risk",
+      label: "Риск",
+      comment: "Остаток ниже безопасного уровня",
+    };
+  }
+  if (closingBalance <= safeBalance * 1.25) {
+    return {
+      key: "attention",
+      label: "Зона внимания",
+      comment: "Запас ликвидности снижен",
+    };
+  }
+  return { key: "normal", label: "Безопасно", comment: "-" };
+}
+
+function buildAnalyticsFindings({ summary, safeBalance, structure, comparison, forecast, settings }) {
+  const findings = [];
+  const addFinding = (item) => {
+    if (!item || !item.code) return;
+    if (findings.some((row) => row.code === item.code)) return;
+    findings.push(item);
+  };
+
+  if (forecast.firstGap) {
+    addFinding({
+      code: "cash_gap_forecast",
+      priority: 1,
+      severity: "high",
+      title: "Прогнозируется кассовый разрыв",
+      fact: `На дату ${forecast.firstGap.period} остаток становится отрицательным: ${formatMoney(forecast.firstGap.closingBalance)}.`,
+      interpretation: "При текущем сценарии денежных средств не хватает для покрытия выплат.",
+      recommendation:
+        "Перенести необязательные выплаты, ускорить сбор дебиторки, согласовать отсрочки и подготовить резервное финансирование.",
+    });
+  }
+
+  if (summary.closingBalance <= safeBalance) {
+    addFinding({
+      code: "low_closing_balance",
+      priority: 2,
+      severity: summary.closingBalance <= 0 ? "high" : "medium",
+      title: "Остаток на конец периода в рискованной зоне",
+      fact: `Конечный остаток: ${formatMoney(summary.closingBalance)} при безопасном уровне ${formatMoney(safeBalance)}.`,
+      interpretation: "Запас ликвидности недостаточен для устойчивого покрытия ближайших выплат.",
+      recommendation:
+        "Сформировать резерв ликвидности, ограничить необязательные выплаты и усилить недельное планирование платежей.",
+    });
+  }
+
+  if (summary.operatingFlow < 0) {
+    addFinding({
+      code: "negative_operating_flow",
+      priority: 3,
+      severity: "high",
+      title: "Отрицательный операционный денежный поток",
+      fact: `Операционный поток: ${formatMoney(summary.operatingFlow)}.`,
+      interpretation: "Основная деятельность не покрывает текущие денежные выплаты.",
+      recommendation:
+        "Проверить дебиторскую задолженность, маржинальность продаж, объём закупок и постоянные расходы.",
+    });
+  }
+
+  if (summary.operatingFlow < 0 && summary.financingFlow > 0) {
+    addFinding({
+      code: "financing_dependency",
+      priority: 4,
+      severity: "medium",
+      title: "Зависимость от внешнего финансирования",
+      fact: `Финансовый поток положительный: ${formatMoney(summary.financingFlow)} при отрицательном операционном потоке.`,
+      interpretation: "Операционный дефицит компенсируется кредитами или иными финансовыми вливаниями.",
+      recommendation:
+        "Снизить зависимость от заемных средств за счет улучшения операционной рентабельности и контроля оборотного капитала.",
+    });
+  }
+
+  if (forecast.outflowSurgePct > normalizeIntInRange(settings.outflowSurgeThreshold, 30, 1, 300)) {
+    addFinding({
+      code: "outflow_surge",
+      priority: 5,
+      severity: "medium",
+      title: "Ожидается повышенная нагрузка по выплатам",
+      fact: `Прогнозные выплаты выше среднего на ${formatPercent(forecast.outflowSurgePct)}.`,
+      interpretation: "Рост выплат оказывает дополнительное давление на ликвидность.",
+      recommendation:
+        "Перепроверить график платежей и распределить крупные выплаты по нескольким периодам при возможности.",
+    });
+  }
+
+  if (structure.inflowTop3Share > normalizeIntInRange(settings.top3Threshold, 70, 1, 100)) {
+    addFinding({
+      code: "inflow_concentration_top3",
+      priority: 6,
+      severity: "medium",
+      title: "Высокая концентрация поступлений",
+      fact: `Доля топ-3 источников поступлений: ${formatPercent(structure.inflowTop3Share)}.`,
+      interpretation: "Зависимость от ограниченного числа источников повышает риск просадки притока денег.",
+      recommendation: "Диверсифицировать источники поступлений и снизить зависимость от крупных клиентов.",
+    });
+  }
+
+  if (structure.inflowTop1Share > normalizeIntInRange(settings.top1Threshold, 40, 1, 100)) {
+    addFinding({
+      code: "inflow_concentration_top1",
+      priority: 6,
+      severity: "medium",
+      title: "Высокая зависимость от одного источника поступлений",
+      fact: `Доля крупнейшего источника поступлений: ${formatPercent(structure.inflowTop1Share)}.`,
+      interpretation: "Концентрация по одному источнику делает поток менее устойчивым.",
+      recommendation: "Снизить зависимость от одного крупного клиента и расширить воронку поступлений.",
+    });
+  }
+
+  const investmentShare = summary.outflow > 0 ? (Math.max(0, -summary.investingFlow) / summary.outflow) * 100 : 0;
+  if (investmentShare > normalizeIntInRange(settings.investmentLoadThreshold, 25, 1, 100)) {
+    addFinding({
+      code: "investment_load",
+      priority: 7,
+      severity: "medium",
+      title: "Повышенная инвестиционная нагрузка",
+      fact: `Инвестиционные выплаты составляют ${formatPercent(investmentShare)} от всех выплат периода.`,
+      interpretation: "Капитальные вложения заметно снижают доступный денежный остаток.",
+      recommendation: "Оценить перенос части инвестиций и приоритизировать проекты с быстрым возвратом.",
+    });
+  }
+
+  const majorExpenseShare = structure.outflowTop1Share;
+  if (majorExpenseShare > normalizeIntInRange(settings.expenseShareThreshold, 30, 1, 100)) {
+    addFinding({
+      code: "expense_concentration",
+      priority: 8,
+      severity: "low",
+      title: "Высокая концентрация выплат по одной статье",
+      fact: `Крупнейшая расходная статья занимает ${formatPercent(majorExpenseShare)} от всех выплат.`,
+      interpretation: "Одна статья существенно влияет на общий денежный поток.",
+      recommendation: "Пересмотреть условия по этой статье и проработать варианты оптимизации.",
+    });
+  }
+
+  if (summary.net > 0) {
+    addFinding({
+      code: "period_positive_net",
+      priority: 9,
+      severity: "low",
+      title: "Период завершен с положительным чистым потоком",
+      fact: `Чистый денежный поток: ${formatMoney(summary.net)}.`,
+      interpretation: "За период объем денежных средств увеличился.",
+      recommendation: "",
+    });
+  } else if (summary.net < 0) {
+    addFinding({
+      code: "period_negative_net",
+      priority: 9,
+      severity: "medium",
+      title: "Период завершен с отрицательным чистым потоком",
+      fact: `Чистый денежный поток: ${formatMoney(summary.net)}.`,
+      interpretation: "За период объем денежных средств сократился.",
+      recommendation: "Проверить приоритет выплат и ускорить поступления по ключевым клиентам.",
+    });
+  } else {
+    addFinding({
+      code: "period_balanced_net",
+      priority: 9,
+      severity: "low",
+      title: "Поток периода сбалансирован",
+      fact: "Чистый денежный поток близок к нулю.",
+      interpretation: "Поступления и выплаты в периоде сопоставимы.",
+      recommendation: "",
+    });
+  }
+
+  const netComparison = comparison.find((row) => row.label === "Чистый денежный поток");
+  if (netComparison && Number.isFinite(netComparison.deltaPct)) {
+    if (netComparison.deltaPct > 0) {
+      addFinding({
+        code: "net_improved_vs_prev",
+        priority: 10,
+        severity: "low",
+        title: "Чистый поток улучшился к прошлому периоду",
+        fact: `Изменение: +${formatPercent(netComparison.deltaPct)}.`,
+        interpretation: "Динамика ДДС положительная относительно предыдущего периода.",
+        recommendation: "",
+      });
+    } else if (netComparison.deltaPct < 0) {
+      addFinding({
+        code: "net_worse_vs_prev",
+        priority: 10,
+        severity: "medium",
+        title: "Чистый поток ухудшился к прошлому периоду",
+        fact: `Изменение: ${formatPercent(netComparison.deltaPct)}.`,
+        interpretation: "Динамика ДДС отрицательная относительно предыдущего периода.",
+        recommendation: "Провести детализацию статей с максимальным ухудшением и скорректировать план платежей.",
+      });
+    }
+  }
+
+  return findings.sort((a, b) => a.priority - b.priority);
+}
+
+function renderAnalyticsSummaryMetrics(summary, safeBalance, forecast) {
+  const metrics = [
+    { label: "Остаток на начало", value: formatMoney(summary.openingBalance) },
+    { label: "Поступления", value: formatMoney(summary.inflow) },
+    { label: "Выплаты", value: formatMoney(summary.outflow) },
+    { label: "Чистый поток", value: formatMoney(summary.net) },
+    { label: "Остаток на конец", value: formatMoney(summary.closingBalance) },
+    { label: "Операционный поток", value: formatMoney(summary.operatingFlow) },
+    { label: "Инвестиционный поток", value: formatMoney(summary.investingFlow) },
+    { label: "Финансовый поток", value: formatMoney(summary.financingFlow) },
+    { label: `Прогноз ${state.analytics.forecastHorizon}д`, value: formatMoney(forecast.endingBalance) },
+    { label: "Безопасный остаток", value: formatMoney(safeBalance) },
+  ];
+
+  els.analyticsSummaryMetrics.innerHTML = metrics
+    .map(
+      (item) => `
+      <article class="metric">
+        <div class="label">${item.label}</div>
+        <div class="value">${item.value}</div>
+      </article>
+    `
+    )
+    .join("");
+}
+
+function renderStructureTables(structure) {
+  fillStructureTable(els.analyticsInflowTopArticlesBody, structure.inflowTopArticles, "Нет поступлений.");
+  fillStructureTable(els.analyticsOutflowTopArticlesBody, structure.outflowTopArticles, "Нет выплат.");
+  fillStructureTable(els.analyticsInflowTopCounterpartiesBody, structure.inflowTopCounterparties, "Нет данных по контрагентам.");
+  fillStructureTable(els.analyticsOutflowTopCounterpartiesBody, structure.outflowTopCounterparties, "Нет данных по контрагентам.");
+}
+
+function fillStructureTable(bodyEl, rows, emptyText) {
+  if (!bodyEl) return;
+  if (!rows || rows.length === 0) {
+    bodyEl.innerHTML = `<tr><td colspan="3" class="empty">${emptyText}</td></tr>`;
+    return;
+  }
+  bodyEl.innerHTML = rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(row.name)}</td>
+        <td>${formatMoney(row.amount)}</td>
+        <td>${formatPercent(row.share)}</td>
+      </tr>
+    `
+    )
+    .join("");
+}
+
+function renderComparisonTable(comparisonRows) {
+  if (!els.analyticsComparisonBody) return;
+  if (!comparisonRows || comparisonRows.length === 0) {
+    els.analyticsComparisonBody.innerHTML = `<tr><td colspan="4" class="empty">Нет данных для сравнения.</td></tr>`;
+    return;
+  }
+
+  els.analyticsComparisonBody.innerHTML = comparisonRows
+    .map((row) => {
+      const deltaLabel = Number.isFinite(row.deltaPct)
+        ? `${formatMoney(row.delta)} (${row.delta >= 0 ? "+" : ""}${formatPercent(row.deltaPct)})`
+        : `${formatMoney(row.delta)} (н/д %)`;
+      return `
+        <tr>
+          <td>${escapeHtml(row.label)}</td>
+          <td>${formatMoney(row.currentValue)}</td>
+          <td>${formatMoney(row.previousValue)}</td>
+          <td>${deltaLabel}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderForecastTable(rows) {
+  if (!els.analyticsForecastBody) return;
+  if (!rows || rows.length === 0) {
+    els.analyticsForecastBody.innerHTML = `<tr><td colspan="8" class="empty">Нет данных для прогноза.</td></tr>`;
+    return;
+  }
+  els.analyticsForecastBody.innerHTML = rows
+    .map(
+      (row) => `
+      <tr class="${row.statusKey === "gap" ? "unresolved-row" : ""}">
+        <td>${escapeHtml(row.period)}</td>
+        <td>${formatMoney(row.openingBalance)}</td>
+        <td>${formatMoney(row.inflow)}</td>
+        <td>${formatMoney(row.outflow)}</td>
+        <td>${formatMoney(row.net)}</td>
+        <td>${formatMoney(row.closingBalance)}</td>
+        <td><span class="risk-chip ${row.statusKey}">${escapeHtml(row.statusLabel)}</span></td>
+        <td>${escapeHtml(row.comment)}</td>
+      </tr>
+    `
+    )
+    .join("");
+}
+
+function renderFindings(findings) {
+  if (!els.analyticsFindingsList || !els.analyticsToggleFindingsBtn) return;
+  if (!findings || findings.length === 0) {
+    els.analyticsFindingsList.innerHTML = `<div class="empty">Нет данных для формирования выводов.</div>`;
+    els.analyticsToggleFindingsBtn.classList.add("hidden");
+    return;
+  }
+
+  const showAll = Boolean(state.analytics.showAllFindings);
+  const visible = showAll ? findings : findings.slice(0, ANALYTICS_PRIMARY_FINDINGS_LIMIT);
+  els.analyticsFindingsList.innerHTML = visible
+    .map(
+      (item) => `
+      <article class="analytics-finding severity-${item.severity}">
+        <div class="analytics-finding-title">
+          <span>${escapeHtml(item.title)}</span>
+          <span class="risk-chip ${item.severity === "high" ? "risk" : item.severity === "medium" ? "attention" : "normal"}">${
+            item.severity === "high" ? "Высокий приоритет" : item.severity === "medium" ? "Средний приоритет" : "Наблюдение"
+          }</span>
+        </div>
+        <div><strong>Факт:</strong> ${escapeHtml(item.fact)}</div>
+        <div><strong>Интерпретация:</strong> ${escapeHtml(item.interpretation)}</div>
+        ${item.recommendation ? `<div><strong>Рекомендация:</strong> ${escapeHtml(item.recommendation)}</div>` : ""}
+      </article>
+    `
+    )
+    .join("");
+
+  if (findings.length > ANALYTICS_PRIMARY_FINDINGS_LIMIT) {
+    els.analyticsToggleFindingsBtn.classList.remove("hidden");
+    els.analyticsToggleFindingsBtn.textContent = showAll ? "Показать только ключевые" : "Показать все выводы";
+  } else {
+    els.analyticsToggleFindingsBtn.classList.add("hidden");
+  }
+}
+
+function renderRecommendations(recommendations) {
+  if (!els.analyticsRecommendationsList) return;
+  if (!recommendations || recommendations.length === 0) {
+    els.analyticsRecommendationsList.innerHTML = `<li>Критичных рекомендаций нет, продолжайте регулярный мониторинг ДДС.</li>`;
+    return;
+  }
+  els.analyticsRecommendationsList.innerHTML = recommendations.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+}
+
+function exportAnalyticsCsv() {
+  if (!requirePermission("analytics.export", "Недостаточно прав: роль не позволяет выгружать аналитику.")) return;
+  const snapshot = state.analytics.latest;
+  if (!snapshot) {
+    if (els.analyticsStatus) els.analyticsStatus.textContent = "Сначала сформируйте аналитику.";
+    return;
+  }
+
+  const lines = [];
+  lines.push(["Раздел", "Показатель", "Значение", "Комментарий"]);
+  lines.push(["Сводка", "Остаток на начало", formatNumberForCsv(snapshot.summary.openingBalance), ""]);
+  lines.push(["Сводка", "Поступления", formatNumberForCsv(snapshot.summary.inflow), ""]);
+  lines.push(["Сводка", "Выплаты", formatNumberForCsv(snapshot.summary.outflow), ""]);
+  lines.push(["Сводка", "Чистый поток", formatNumberForCsv(snapshot.summary.net), ""]);
+  lines.push(["Сводка", "Остаток на конец", formatNumberForCsv(snapshot.summary.closingBalance), ""]);
+  lines.push(["Сводка", "Операционный поток", formatNumberForCsv(snapshot.summary.operatingFlow), ""]);
+  lines.push(["Сводка", "Инвестиционный поток", formatNumberForCsv(snapshot.summary.investingFlow), ""]);
+  lines.push(["Сводка", "Финансовый поток", formatNumberForCsv(snapshot.summary.financingFlow), ""]);
+  lines.push(["Сводка", "Безопасный остаток", formatNumberForCsv(snapshot.safeBalance), ""]);
+
+  snapshot.forecast.rows.forEach((row) => {
+    lines.push([
+      "Прогноз",
+      row.period,
+      formatNumberForCsv(row.closingBalance),
+      `In:${formatNumberForCsv(row.inflow)} Out:${formatNumberForCsv(row.outflow)} ${row.statusLabel}`,
+    ]);
+  });
+
+  snapshot.findings.forEach((item) => {
+    lines.push(["Вывод", item.title, item.fact, `${item.interpretation} ${item.recommendation || ""}`.trim()]);
+  });
+
+  snapshot.recommendations.forEach((item) => {
+    lines.push(["Рекомендация", "", "", item]);
+  });
+
+  const csv = lines
+    .map((line) => line.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(";"))
+    .join("\n");
+  triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), "dds-analytics.csv");
+}
+
+function mapAnalyticsScenarioToPlanScenario(scenario) {
+  const normalized = normalizeAnalyticsScenario(scenario);
+  if (normalized === "optimistic") return "optimistic";
+  if (normalized === "conservative") return "conservative";
+  return "base";
+}
+
+function computeAverageMonthlyOutflow(allOps, lookbackMonths, anchorDate) {
+  const months = normalizeIntInRange(lookbackMonths, 3, 1, 12);
+  const monthRows = aggregateByMonth(
+    (allOps || []).filter((op) => op.dateObj <= endOfDay(anchorDate) && classifyCashflowActivity(op.activity) !== "technical")
+  );
+  const recent = monthRows.slice(-months);
+  if (recent.length === 0) return 0;
+  return recent.reduce((sum, row) => sum + (Number(row.outAmount) || 0), 0) / recent.length;
+}
+
+function normalizeAnalyticsCompareMode(value) {
+  const mode = String(value || "analog").trim().toLowerCase();
+  return ["analog", "month", "week", "quarter"].includes(mode) ? mode : "analog";
+}
+
+function normalizeAnalyticsForecastMode(value) {
+  const mode = String(value || "plan").trim().toLowerCase();
+  return ["plan", "stat"].includes(mode) ? mode : "plan";
+}
+
+function normalizeAnalyticsScenario(value) {
+  const scenario = String(value || "base").trim().toLowerCase();
+  return ["base", "optimistic", "conservative"].includes(scenario) ? scenario : "base";
+}
+
+function normalizeSafeBalanceMode(value) {
+  const mode = String(value || "fixed").trim().toLowerCase();
+  return ["fixed", "percent_outflow"].includes(mode) ? mode : "fixed";
+}
+
+function normalizeIntInRange(value, fallback, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(numeric)));
+}
+
+function normalizeMoneyInput(value, fallback) {
+  const amount = parseAmount(String(value || ""));
+  return Number.isFinite(amount) ? amount : fallback;
 }
 
 function bindBankEvents() {
@@ -1801,6 +3504,7 @@ function renderReport() {
   renderShortDdsTable(totalsByActivity, grandTotals, reportRows.length);
   renderReportTable(reportRows, totalsByActivity, grandTotals);
   renderMonthTable(monthRows);
+  renderAnalyticsTab();
   renderReconcileTable();
 }
 
@@ -2677,6 +4381,242 @@ function saveArticles(articles) {
   } catch (error) {
     console.warn("Cannot save articles to localStorage", error);
   }
+}
+
+function createDefaultPlanState() {
+  return {
+    items: [],
+    openings: [],
+    assumptions: [{ scenario: "base", inflowFactor: 1, outflowFactor: 1 }],
+    selectedScenario: "base",
+    probabilityFilter: "all",
+    sourceFiles: {
+      items: "",
+      openings: "",
+      assumptions: "",
+    },
+  };
+}
+
+function loadPlanState() {
+  const fallback = createDefaultPlanState();
+  try {
+    const raw = localStorage.getItem(STORAGE_PLAN_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return fallback;
+
+    return normalizePlanState(parsed, fallback);
+  } catch (error) {
+    console.warn("Cannot load plan state from localStorage", error);
+    return fallback;
+  }
+}
+
+function savePlanState(planState) {
+  try {
+    localStorage.setItem(STORAGE_PLAN_KEY, JSON.stringify(planState));
+  } catch (error) {
+    console.warn("Cannot save plan state to localStorage", error);
+  }
+}
+
+function normalizePlanState(rawState, fallback) {
+  if (!rawState || typeof rawState !== "object") return fallback;
+
+  const items = Array.isArray(rawState.items)
+    ? rawState.items
+        .map((item) => {
+          const month = normalizeMonthKey(item?.month || item?.date || "");
+          const amount = toMaybeNumber(item?.amount);
+          if (!month || !Number.isFinite(amount)) return null;
+          const dateObj = parseFlexibleDate(item?.date || "");
+          return {
+            month,
+            date: dateObj ? toDateInputValue(dateObj) : "",
+            legalEntity: String(item?.legalEntity || "").trim(),
+            bankAccount: String(item?.bankAccount || "").trim(),
+            activity: String(item?.activity || "").trim() || "Не определено",
+            ddsArticle: String(item?.ddsArticle || "").trim(),
+            type: resolvePlanType(item?.type, amount),
+            amount: Math.abs(amount),
+            probability: normalizePlanProbability(item?.probability),
+            scenario: normalizePlanScenario(item?.scenario || "base"),
+            comment: String(item?.comment || "").trim(),
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  const openings = Array.isArray(rawState.openings)
+    ? rawState.openings
+        .map((row) => {
+          const month = normalizeMonthKey(row?.month);
+          const openingBalance = toMaybeNumber(row?.openingBalance);
+          if (!month || !Number.isFinite(openingBalance)) return null;
+          return {
+            month,
+            legalEntity: String(row?.legalEntity || "").trim(),
+            bankAccount: String(row?.bankAccount || "").trim(),
+            openingBalance,
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  const assumptions = Array.isArray(rawState.assumptions)
+    ? rawState.assumptions
+        .map((row) => {
+          const scenario = normalizePlanScenario(row?.scenario || "base");
+          const inflowFactor = toMaybeNumber(row?.inflowFactor);
+          const outflowFactor = toMaybeNumber(row?.outflowFactor);
+          if (!scenario || !Number.isFinite(inflowFactor) || !Number.isFinite(outflowFactor)) return null;
+          return {
+            scenario,
+            inflowFactor,
+            outflowFactor,
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  const sourceFiles =
+    rawState.sourceFiles && typeof rawState.sourceFiles === "object"
+      ? {
+          items: String(rawState.sourceFiles.items || ""),
+          openings: String(rawState.sourceFiles.openings || ""),
+          assumptions: String(rawState.sourceFiles.assumptions || ""),
+        }
+      : { ...fallback.sourceFiles };
+
+  const normalized = {
+    items,
+    openings,
+    assumptions: assumptions.length > 0 ? assumptions : fallback.assumptions,
+    selectedScenario: normalizePlanScenario(rawState.selectedScenario || fallback.selectedScenario),
+    probabilityFilter: ["all", "high", "medium-high"].includes(String(rawState.probabilityFilter || ""))
+      ? String(rawState.probabilityFilter)
+      : fallback.probabilityFilter,
+    sourceFiles,
+  };
+
+  const scenarios = uniqueValues(
+    [...normalized.assumptions.map((row) => normalizePlanScenario(row.scenario)), ...normalized.items.map((row) => row.scenario), "base"]
+      .filter(Boolean)
+  );
+  if (!scenarios.includes(normalized.selectedScenario)) {
+    normalized.selectedScenario = scenarios[0] || "base";
+  }
+  return normalized;
+}
+
+function createDefaultAnalyticsState() {
+  return {
+    dateFrom: "",
+    dateTo: "",
+    compareMode: "analog",
+    forecastHorizon: 30,
+    forecastMode: "plan",
+    scenario: "base",
+    openingBalance: 0,
+    safeBalanceMode: "fixed",
+    safeBalanceFixed: 20000,
+    safeBalancePercent: 30,
+    top1Threshold: 40,
+    top3Threshold: 70,
+    expenseShareThreshold: 30,
+    investmentLoadThreshold: 25,
+    outflowSurgeThreshold: 30,
+    outflowSurgeLookback: 3,
+    scenarioOptimisticInflow: 10,
+    scenarioOptimisticOutflow: 5,
+    scenarioConservativeInflow: 15,
+    scenarioConservativeOutflow: 10,
+    showAllFindings: false,
+    latest: null,
+  };
+}
+
+function loadAnalyticsState() {
+  const fallback = createDefaultAnalyticsState();
+  try {
+    const raw = localStorage.getItem(STORAGE_ANALYTICS_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return fallback;
+    return normalizeAnalyticsState(parsed, fallback);
+  } catch (error) {
+    console.warn("Cannot load analytics state from localStorage", error);
+    return fallback;
+  }
+}
+
+function saveAnalyticsState(analyticsState) {
+  try {
+    const payload = { ...(analyticsState || {}) };
+    delete payload.latest;
+    localStorage.setItem(STORAGE_ANALYTICS_KEY, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Cannot save analytics state to localStorage", error);
+  }
+}
+
+function normalizeAnalyticsState(rawState, fallback) {
+  return {
+    dateFrom: parseFlexibleDate(rawState.dateFrom || "")
+      ? toDateInputValue(parseFlexibleDate(rawState.dateFrom))
+      : fallback.dateFrom,
+    dateTo: parseFlexibleDate(rawState.dateTo || "")
+      ? toDateInputValue(parseFlexibleDate(rawState.dateTo))
+      : fallback.dateTo,
+    compareMode: normalizeAnalyticsCompareMode(rawState.compareMode || fallback.compareMode),
+    forecastHorizon: normalizeIntInRange(rawState.forecastHorizon, fallback.forecastHorizon, 7, 90),
+    forecastMode: normalizeAnalyticsForecastMode(rawState.forecastMode || fallback.forecastMode),
+    scenario: normalizeAnalyticsScenario(rawState.scenario || fallback.scenario),
+    openingBalance: Number.isFinite(Number(rawState.openingBalance)) ? Number(rawState.openingBalance) : fallback.openingBalance,
+    safeBalanceMode: normalizeSafeBalanceMode(rawState.safeBalanceMode || fallback.safeBalanceMode),
+    safeBalanceFixed: Number.isFinite(Number(rawState.safeBalanceFixed))
+      ? Number(rawState.safeBalanceFixed)
+      : fallback.safeBalanceFixed,
+    safeBalancePercent: normalizeIntInRange(rawState.safeBalancePercent, fallback.safeBalancePercent, 1, 500),
+    top1Threshold: normalizeIntInRange(rawState.top1Threshold, fallback.top1Threshold, 1, 100),
+    top3Threshold: normalizeIntInRange(rawState.top3Threshold, fallback.top3Threshold, 1, 100),
+    expenseShareThreshold: normalizeIntInRange(rawState.expenseShareThreshold, fallback.expenseShareThreshold, 1, 100),
+    investmentLoadThreshold: normalizeIntInRange(
+      rawState.investmentLoadThreshold,
+      fallback.investmentLoadThreshold,
+      1,
+      100
+    ),
+    outflowSurgeThreshold: normalizeIntInRange(rawState.outflowSurgeThreshold, fallback.outflowSurgeThreshold, 1, 300),
+    outflowSurgeLookback: normalizeIntInRange(rawState.outflowSurgeLookback, fallback.outflowSurgeLookback, 1, 12),
+    scenarioOptimisticInflow: normalizeIntInRange(
+      rawState.scenarioOptimisticInflow,
+      fallback.scenarioOptimisticInflow,
+      0,
+      200
+    ),
+    scenarioOptimisticOutflow: normalizeIntInRange(
+      rawState.scenarioOptimisticOutflow,
+      fallback.scenarioOptimisticOutflow,
+      0,
+      100
+    ),
+    scenarioConservativeInflow: normalizeIntInRange(
+      rawState.scenarioConservativeInflow,
+      fallback.scenarioConservativeInflow,
+      0,
+      100
+    ),
+    scenarioConservativeOutflow: normalizeIntInRange(
+      rawState.scenarioConservativeOutflow,
+      fallback.scenarioConservativeOutflow,
+      0,
+      200
+    ),
+    showAllFindings: Boolean(rawState.showAllFindings),
+    latest: null,
+  };
 }
 
 function loadAccessState() {
@@ -3616,6 +5556,36 @@ function toDateInputValue(date) {
   ).padStart(2, "0")}`;
 }
 
+function startOfDay(date) {
+  const value = date instanceof Date ? date : parseFlexibleDate(date);
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return new Date(NaN);
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function endOfDay(date) {
+  const value = startOfDay(date);
+  if (Number.isNaN(value.getTime())) return value;
+  value.setHours(23, 59, 59, 999);
+  return value;
+}
+
+function addDays(date, days) {
+  const value = startOfDay(date);
+  if (Number.isNaN(value.getTime())) return value;
+  value.setDate(value.getDate() + Number(days || 0));
+  return value;
+}
+
+function addMonths(date, months) {
+  const value = startOfDay(date);
+  if (Number.isNaN(value.getTime())) return value;
+  const day = value.getDate();
+  const target = new Date(value.getFullYear(), value.getMonth() + Number(months || 0), 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, lastDay));
+  return target;
+}
+
 function formatMoney(value) {
   return new Intl.NumberFormat("ru-RU", {
     style: "currency",
@@ -3663,6 +5633,11 @@ function formatNumberForCsv(value) {
 function formatNumberForInput(value) {
   if (!Number.isFinite(value)) return "";
   return String(value.toFixed(2)).replace(".", ",");
+}
+
+function formatPercent(value) {
+  if (!Number.isFinite(value)) return "н/д";
+  return `${value.toFixed(1).replace(".", ",")}%`;
 }
 
 function toMaybeNumber(value) {

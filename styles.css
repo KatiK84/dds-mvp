@@ -172,6 +172,102 @@ button.secondary {
   gap: 12px;
 }
 
+.plan-import-grid {
+  grid-template-columns: minmax(240px, 2fr) minmax(180px, 1fr);
+}
+
+.plan-status-list {
+  margin-top: 6px;
+}
+
+.plan-status-list .status {
+  margin-top: 6px;
+}
+
+.analytics-settings-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.analytics-findings-layout {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 14px;
+}
+
+.analytics-findings-list {
+  display: grid;
+  gap: 8px;
+}
+
+.analytics-finding {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.analytics-finding.severity-high {
+  border-color: #e08b8b;
+  background: #fff2f2;
+}
+
+.analytics-finding.severity-medium {
+  border-color: #e3cf95;
+  background: #fff9e8;
+}
+
+.analytics-finding.severity-low {
+  border-color: #b6d3bd;
+  background: #eff9f1;
+}
+
+.analytics-finding-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.risk-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.76rem;
+}
+
+.risk-chip.normal {
+  background: #eff9f1;
+}
+
+.risk-chip.attention {
+  background: #fff6df;
+}
+
+.risk-chip.risk {
+  background: #ffeaea;
+}
+
+.risk-chip.gap {
+  background: #ffdede;
+  border-color: #d46d6d;
+}
+
+.analytics-recommendations-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.analytics-structure-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
 .inline-form {
   display: grid;
   grid-template-columns: 1fr;
@@ -540,7 +636,9 @@ tr.unresolved-row {
   .import-actions,
   .form-grid,
   .banks-filter-grid,
-  .access-grid {
+  .access-grid,
+  .plan-import-grid,
+  .analytics-findings-layout {
     grid-template-columns: 1fr;
   }
 
