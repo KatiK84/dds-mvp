@@ -356,11 +356,13 @@ function aggregateByArticle(operations) {
     totals.count += row.count;
   });
 
+  const rowsForDdsTotal = reportRows.filter((row) => !isTechnicalActivity(row.activity));
+
   const grandTotals = {
-    inAmount: reportRows.reduce((sum, row) => sum + row.inAmount, 0),
-    outAmount: reportRows.reduce((sum, row) => sum + row.outAmount, 0),
-    net: reportRows.reduce((sum, row) => sum + row.net, 0),
-    count: reportRows.reduce((sum, row) => sum + row.count, 0),
+    inAmount: rowsForDdsTotal.reduce((sum, row) => sum + row.inAmount, 0),
+    outAmount: rowsForDdsTotal.reduce((sum, row) => sum + row.outAmount, 0),
+    net: rowsForDdsTotal.reduce((sum, row) => sum + row.net, 0),
+    count: rowsForDdsTotal.reduce((sum, row) => sum + row.count, 0),
   };
 
   return { reportRows, totalsByActivity, grandTotals };
@@ -433,7 +435,7 @@ function renderReportTable(rows, totalsByActivity, grandTotals) {
 
   html += `
     <tr class="grand-total">
-      <td colspan="2">Итого по ДДС</td>
+      <td colspan="2">Итого по ДДС (без технических операций)</td>
       <td>${formatMoney(grandTotals.inAmount)}</td>
       <td>${formatMoney(grandTotals.outAmount)}</td>
       <td>${formatMoney(grandTotals.net)}</td>
@@ -1047,6 +1049,10 @@ function statusLabel(status) {
   if (status === "RENAME") return "Переименовать";
   if (status === "INACTIVE") return "Неактуально";
   return "Активно";
+}
+
+function isTechnicalActivity(activity) {
+  return normalizeText(activity) === "техническая операция";
 }
 
 function escapeHtml(value) {
