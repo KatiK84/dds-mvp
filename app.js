@@ -155,6 +155,9 @@ const state = {
     data: "all",
     expandedByAccountId: {},
   },
+  planUi: {
+    editingIndex: -1,
+  },
   operationsRaw: [],
   manualAssignments: {},
   filteredOperations: [],
@@ -230,6 +233,22 @@ const els = {
   planMetrics: document.getElementById("planMetrics"),
   planMonthTableBody: document.getElementById("planMonthTableBody"),
   planActivityTableBody: document.getElementById("planActivityTableBody"),
+  planItemForm: document.getElementById("planItemForm"),
+  planItemMonth: document.getElementById("planItemMonth"),
+  planItemDate: document.getElementById("planItemDate"),
+  planItemType: document.getElementById("planItemType"),
+  planItemAmount: document.getElementById("planItemAmount"),
+  planItemActivity: document.getElementById("planItemActivity"),
+  planItemDdsArticle: document.getElementById("planItemDdsArticle"),
+  planItemLegalEntity: document.getElementById("planItemLegalEntity"),
+  planItemBankAccount: document.getElementById("planItemBankAccount"),
+  planItemProbability: document.getElementById("planItemProbability"),
+  planItemScenario: document.getElementById("planItemScenario"),
+  planItemComment: document.getElementById("planItemComment"),
+  planItemSubmitBtn: document.getElementById("planItemSubmitBtn"),
+  planItemCancelBtn: document.getElementById("planItemCancelBtn"),
+  planItemFormStatus: document.getElementById("planItemFormStatus"),
+  planItemsTableBody: document.getElementById("planItemsTableBody"),
   analyticsSettingsForm: document.getElementById("analyticsSettingsForm"),
   analyticsDateFrom: document.getElementById("analyticsDateFrom"),
   analyticsDateTo: document.getElementById("analyticsDateTo"),
@@ -482,6 +501,8 @@ function applyRoleAccess() {
   setElementDisabled(els.downloadPlanOpeningsTemplateBtn, !canManagePlan);
   setElementDisabled(els.downloadPlanAssumptionsTemplateBtn, !canManagePlan);
   setElementDisabled(els.clearPlanDataBtn, !canManagePlan);
+  setFormDisabled(els.planItemForm, !canManagePlan);
+  setElementDisabled(els.planItemCancelBtn, !canManagePlan);
   setElementDisabled(els.downloadPlanCsvBtn, !canExportPlan);
   setFormDisabled(els.analyticsSettingsForm, !canManageAnalytics);
   setElementDisabled(els.analyticsApplyBtn, !canManageAnalytics);
@@ -612,6 +633,181 @@ function bindPlanEvents() {
     state.plan.probabilityFilter = ["all", "high", "medium-high"].includes(next) ? next : "all";
     persistPlanAndRender(false);
   });
+
+  els.planItemForm?.addEventListener("submit", onPlanItemFormSubmit);
+  els.planItemCancelBtn?.addEventListener("click", cancelPlanItemEdit);
+  els.planItemsTableBody?.addEventListener("click", onPlanItemTableClick);
+}
+
+function onPlanItemFormSubmit(event) {
+  event.preventDefault();
+  if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут менять строки плана.")) return;
+
+  try {
+    const planItem = buildPlanItemFromFormInputs();
+    const editIndex = Number(state.planUi.editingIndex);
+    const editing = Number.isInteger(editIndex) && editIndex >= 0 && editIndex < state.plan.items.length;
+
+    if (editing) {
+      state.plan.items[editIndex] = planItem;
+      logChange(
+        "PLAN_ITEM_UPDATED",
+        "План/Прогноз",
+        `${planItem.month}; ${planItem.type}; ${formatMoney(planItem.amount)}; ${planItem.scenario}`
+      );
+    } else {
+      state.plan.items.push(planItem);
+      logChange(
+        "PLAN_ITEM_ADDED",
+        "План/Прогноз",
+        `${planItem.month}; ${planItem.type}; ${formatMoney(planItem.amount)}; ${planItem.scenario}`
+      );
+    }
+
+    state.plan.items = sortPlanItems(state.plan.items);
+    state.planUi.editingIndex = -1;
+    ensurePlanScenarioSelection();
+    syncPlanItemFormDefaults();
+    persistPlanAndRender(false);
+  } catch (error) {
+    alert(error.message || "Не удалось сохранить строку плана.");
+  }
+}
+
+function onPlanItemTableClick(event) {
+  const button = event.target.closest("button[data-plan-item-action]");
+  if (!button) return;
+  if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут менять строки плана.")) return;
+
+  const action = String(button.dataset.planItemAction || "");
+  const index = Number(button.dataset.planItemIndex);
+  if (!Number.isInteger(index) || index < 0 || index >= state.plan.items.length) return;
+
+  if (action === "edit") {
+    startPlanItemEdit(index);
+    return;
+  }
+
+  if (action !== "delete") return;
+  const item = state.plan.items[index];
+  const confirmDelete = window.confirm(
+    `Удалить строку плана?\n${item.month} | ${item.type} | ${formatMoney(item.amount)} | ${item.activity}`
+  );
+  if (!confirmDelete) return;
+
+  state.plan.items.splice(index, 1);
+  if (state.planUi.editingIndex === index) {
+    state.planUi.editingIndex = -1;
+    syncPlanItemFormDefaults();
+  } else if (state.planUi.editingIndex > index) {
+    state.planUi.editingIndex -= 1;
+  }
+  state.plan.items = sortPlanItems(state.plan.items);
+  ensurePlanScenarioSelection();
+  logChange("PLAN_ITEM_DELETED", "План/Прогноз", `${item.month}; ${item.type}; ${formatMoney(item.amount)}`);
+  persistPlanAndRender(false);
+}
+
+function startPlanItemEdit(index) {
+  const item = state.plan.items[index];
+  if (!item) return;
+  state.planUi.editingIndex = index;
+
+  if (els.planItemMonth) els.planItemMonth.value = item.month;
+  if (els.planItemDate) els.planItemDate.value = item.date || "";
+  if (els.planItemType) els.planItemType.value = item.type === "Выбытие" ? "Выбытие" : "Поступление";
+  if (els.planItemAmount) els.planItemAmount.value = formatNumberForInput(item.amount);
+  if (els.planItemActivity) els.planItemActivity.value = item.activity || "";
+  if (els.planItemDdsArticle) els.planItemDdsArticle.value = item.ddsArticle || "";
+  if (els.planItemLegalEntity) els.planItemLegalEntity.value = item.legalEntity || "";
+  if (els.planItemBankAccount) els.planItemBankAccount.value = item.bankAccount || "";
+  if (els.planItemProbability) els.planItemProbability.value = normalizePlanProbability(item.probability);
+  if (els.planItemScenario) els.planItemScenario.value = normalizePlanScenario(item.scenario || "base");
+  if (els.planItemComment) els.planItemComment.value = item.comment || "";
+  renderPlanItemFormState();
+}
+
+function cancelPlanItemEdit() {
+  state.planUi.editingIndex = -1;
+  syncPlanItemFormDefaults();
+  renderPlanTab();
+}
+
+function syncPlanItemFormDefaults() {
+  if (!els.planItemForm) return;
+  const defaults = createDefaultPlanItemDraft();
+  if (els.planItemMonth) els.planItemMonth.value = defaults.month;
+  if (els.planItemDate) els.planItemDate.value = defaults.date;
+  if (els.planItemType) els.planItemType.value = defaults.type;
+  if (els.planItemAmount) els.planItemAmount.value = "";
+  if (els.planItemActivity) els.planItemActivity.value = defaults.activity;
+  if (els.planItemDdsArticle) els.planItemDdsArticle.value = "";
+  if (els.planItemLegalEntity) els.planItemLegalEntity.value = "";
+  if (els.planItemBankAccount) els.planItemBankAccount.value = "";
+  if (els.planItemProbability) els.planItemProbability.value = defaults.probability;
+  if (els.planItemScenario) els.planItemScenario.value = defaults.scenario;
+  if (els.planItemComment) els.planItemComment.value = "";
+}
+
+function createDefaultPlanItemDraft() {
+  return {
+    month: getCurrentMonthKey(),
+    date: "",
+    type: "Поступление",
+    activity: "01 Операционная деятельность",
+    probability: "medium",
+    scenario: normalizePlanScenario(state.plan?.selectedScenario || "base"),
+  };
+}
+
+function buildPlanItemFromFormInputs() {
+  const monthRaw = String(els.planItemMonth?.value || "").trim();
+  const dateRaw = String(els.planItemDate?.value || "").trim();
+  const typeRaw = String(els.planItemType?.value || "Поступление");
+  const amountRaw = String(els.planItemAmount?.value || "").trim();
+  const activityRaw = String(els.planItemActivity?.value || "").trim();
+  const scenarioRaw = String(els.planItemScenario?.value || "base").trim();
+
+  const dateObj = parseFlexibleDate(dateRaw);
+  const dateMonth = dateObj ? toMonthKey(dateObj) : "";
+  const month = normalizeMonthKey(monthRaw || dateRaw);
+  if (!month) {
+    throw new Error("Укажите месяц строки плана.");
+  }
+  if (dateObj && dateMonth && dateMonth !== month) {
+    throw new Error("Дата должна входить в выбранный месяц.");
+  }
+
+  const amount = parseAmount(amountRaw);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Сумма должна быть больше 0.");
+  }
+
+  return {
+    month,
+    date: dateObj ? toDateInputValue(dateObj) : "",
+    legalEntity: String(els.planItemLegalEntity?.value || "").trim(),
+    bankAccount: String(els.planItemBankAccount?.value || "").trim(),
+    activity: activityRaw || "Не определено",
+    ddsArticle: String(els.planItemDdsArticle?.value || "").trim(),
+    type: resolvePlanType(typeRaw, "1"),
+    amount: Math.abs(amount),
+    probability: normalizePlanProbability(els.planItemProbability?.value || "medium"),
+    scenario: normalizePlanScenario(scenarioRaw || "base"),
+    comment: String(els.planItemComment?.value || "").trim(),
+  };
+}
+
+function sortPlanItems(items) {
+  return [...(items || [])].sort((a, b) => {
+    const byMonth = String(a.month || "").localeCompare(String(b.month || ""));
+    if (byMonth !== 0) return byMonth;
+    const byDate = String(a.date || "").localeCompare(String(b.date || ""));
+    if (byDate !== 0) return byDate;
+    const byScenario = String(a.scenario || "").localeCompare(String(b.scenario || ""));
+    if (byScenario !== 0) return byScenario;
+    return String(a.activity || "").localeCompare(String(b.activity || ""));
+  });
 }
 
 function uploadPlanCsv(kind, file) {
@@ -627,7 +823,8 @@ function uploadPlanCsv(kind, file) {
     try {
       const text = String(reader.result || "");
       if (kind === "items") {
-        state.plan.items = parsePlanItemsCsv(text);
+        state.plan.items = sortPlanItems(parsePlanItemsCsv(text));
+        state.planUi.editingIndex = -1;
         state.plan.sourceFiles.items = fileName;
         logChange("PLAN_ITEMS_IMPORTED", "План/Прогноз", `${fileName}; строк: ${state.plan.items.length}`);
       } else if (kind === "openings") {
@@ -665,9 +862,11 @@ function clearPlanData() {
   }
 
   state.plan = createDefaultPlanState();
+  state.planUi.editingIndex = -1;
   if (els.planItemsFile) els.planItemsFile.value = "";
   if (els.planOpeningsFile) els.planOpeningsFile.value = "";
   if (els.planAssumptionsFile) els.planAssumptionsFile.value = "";
+  syncPlanItemFormDefaults();
   logChange("PLAN_CLEARED", "План/Прогноз", "Плановые CSV очищены");
   persistPlanAndRender(false);
 }
@@ -683,6 +882,9 @@ function persistPlanAndRender(logSave = true) {
 
 function renderPlanTab() {
   if (!els.planScenarioSelect || !els.planProbabilityFilter || !els.planMonthTableBody || !els.planActivityTableBody) return;
+  if (!Number.isInteger(state.planUi.editingIndex) || state.planUi.editingIndex >= state.plan.items.length) {
+    state.planUi.editingIndex = -1;
+  }
   ensurePlanScenarioSelection();
 
   els.planScenarioSelect.innerHTML = getPlanScenarioOptions()
@@ -693,7 +895,9 @@ function renderPlanTab() {
 
   const itemsFile = state.plan.sourceFiles.items
     ? `${state.plan.sourceFiles.items}; строк: ${state.plan.items.length}`
-    : "не загружен.";
+    : state.plan.items.length > 0
+      ? `ручной ввод; строк: ${state.plan.items.length}`
+      : "не загружен.";
   const openingsFile = state.plan.sourceFiles.openings
     ? `${state.plan.sourceFiles.openings}; строк: ${state.plan.openings.length}`
     : "не загружен.";
@@ -715,9 +919,72 @@ function renderPlanTab() {
       `Строк в расчете: ${forecast.includedItems}.`;
   }
 
+  renderPlanItemEditor();
   renderPlanMetrics(forecast);
   renderPlanMonthTable(forecast.monthRows);
   renderPlanActivityTable(forecast.activityRows);
+}
+
+function renderPlanItemEditor() {
+  renderPlanItemFormState();
+  renderPlanItemsTable();
+}
+
+function renderPlanItemFormState() {
+  if (!els.planItemFormStatus || !els.planItemSubmitBtn || !els.planItemCancelBtn) return;
+  const editIndex = Number(state.planUi.editingIndex);
+  const isEditing = Number.isInteger(editIndex) && editIndex >= 0 && editIndex < state.plan.items.length;
+  if (!isEditing) {
+    if (!els.planItemMonth?.value) {
+      syncPlanItemFormDefaults();
+    }
+    els.planItemFormStatus.textContent = "Режим: добавление.";
+    els.planItemSubmitBtn.textContent = "Сохранить строку";
+    return;
+  }
+
+  const item = state.plan.items[editIndex];
+  els.planItemFormStatus.textContent = `Режим: редактирование строки ${editIndex + 1} (${item.month}; ${item.type}).`;
+  els.planItemSubmitBtn.textContent = "Сохранить изменения";
+}
+
+function renderPlanItemsTable() {
+  if (!els.planItemsTableBody) return;
+  if (!state.plan.items || state.plan.items.length === 0) {
+    els.planItemsTableBody.innerHTML = `<tr><td colspan="12" class="empty">Строки plan_items пока не добавлены.</td></tr>`;
+    return;
+  }
+
+  const canManage = hasPermission("plan.manage");
+  els.planItemsTableBody.innerHTML = state.plan.items
+    .map(
+      (row, index) => `
+      <tr>
+        <td>${escapeHtml(row.month)}</td>
+        <td>${row.date ? escapeHtml(row.date) : "н/д"}</td>
+        <td>${escapeHtml(row.type)}</td>
+        <td>${formatMoney(row.amount)}</td>
+        <td>${escapeHtml(row.activity || "")}</td>
+        <td>${escapeHtml(row.ddsArticle || "")}</td>
+        <td>${escapeHtml(row.legalEntity || "")}</td>
+        <td>${escapeHtml(row.bankAccount || "")}</td>
+        <td>${escapeHtml(row.probability || "")}</td>
+        <td>${escapeHtml(row.scenario || "")}</td>
+        <td>${escapeHtml(row.comment || "")}</td>
+        <td>
+          ${
+            canManage
+              ? `
+            <button type="button" class="inline-link" data-plan-item-action="edit" data-plan-item-index="${index}">Редактировать</button>
+            <button type="button" class="inline-link danger" data-plan-item-action="delete" data-plan-item-index="${index}">Удалить</button>
+          `
+              : "—"
+          }
+        </td>
+      </tr>
+    `
+    )
+    .join("");
 }
 
 function renderPlanMetrics(forecast) {
@@ -4490,7 +4757,7 @@ function normalizePlanState(rawState, fallback) {
       : { ...fallback.sourceFiles };
 
   const normalized = {
-    items,
+    items: sortPlanItems(items),
     openings,
     assumptions: assumptions.length > 0 ? assumptions : fallback.assumptions,
     selectedScenario: normalizePlanScenario(rawState.selectedScenario || fallback.selectedScenario),

@@ -187,8 +187,92 @@
           </div>
         </section>
 
+        <section class="table-card">
+          <h2>2. Ручные строки plan_items</h2>
+          <form id="planItemForm" class="controls-grid plan-item-grid">
+            <label>
+              Месяц
+              <input id="planItemMonth" type="month" required />
+            </label>
+            <label>
+              Дата
+              <input id="planItemDate" type="date" />
+            </label>
+            <label>
+              Тип операции
+              <select id="planItemType">
+                <option value="Поступление">Поступление</option>
+                <option value="Выбытие">Выбытие</option>
+              </select>
+            </label>
+            <label>
+              Сумма
+              <input id="planItemAmount" type="text" placeholder="например 12500,00" required />
+            </label>
+            <label>
+              Вид деятельности
+              <input id="planItemActivity" type="text" placeholder="01 Операционная деятельность" />
+            </label>
+            <label>
+              Статья ДДС
+              <input id="planItemDdsArticle" type="text" placeholder="07 фонд Поставщиков (выбытие)" />
+            </label>
+            <label>
+              Юрлицо
+              <input id="planItemLegalEntity" type="text" placeholder="GH GmbH" />
+            </label>
+            <label>
+              Счет
+              <input id="planItemBankAccount" type="text" placeholder="Commerzbank" />
+            </label>
+            <label>
+              Вероятность
+              <select id="planItemProbability">
+                <option value="high">high</option>
+                <option value="medium" selected>medium</option>
+                <option value="low">low</option>
+              </select>
+            </label>
+            <label>
+              Сценарий
+              <input id="planItemScenario" type="text" placeholder="base" />
+            </label>
+            <label class="wide">
+              Комментарий
+              <input id="planItemComment" type="text" />
+            </label>
+            <div class="form-actions plan-item-actions wide">
+              <button id="planItemSubmitBtn" type="submit">Сохранить строку</button>
+              <button id="planItemCancelBtn" type="button" class="secondary">Отменить редактирование</button>
+            </div>
+          </form>
+          <p id="planItemFormStatus" class="status">Режим: добавление.</p>
+
+          <div class="table-wrap small">
+            <table>
+              <thead>
+                <tr>
+                  <th>Месяц</th>
+                  <th>Дата</th>
+                  <th>Тип</th>
+                  <th>Сумма</th>
+                  <th>Вид деятельности</th>
+                  <th>Статья ДДС</th>
+                  <th>Юрлицо</th>
+                  <th>Счет</th>
+                  <th>Вероятность</th>
+                  <th>Сценарий</th>
+                  <th>Комментарий</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody id="planItemsTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="card controls">
-          <h2>2. Параметры прогноза</h2>
+          <h2>3. Параметры прогноза</h2>
           <div class="controls-grid">
             <label>
               Сценарий
@@ -212,7 +296,7 @@
         <section class="metrics" id="planMetrics"></section>
 
         <section class="table-card">
-          <h2>3. Прогноз по месяцам</h2>
+          <h2>4. Прогноз по месяцам</h2>
           <div class="table-wrap small">
             <table>
               <thead>
@@ -232,7 +316,7 @@
         </section>
 
         <section class="table-card">
-          <h2>4. Прогноз по видам деятельности</h2>
+          <h2>5. Прогноз по видам деятельности</h2>
           <div class="table-wrap small">
             <table>
               <thead>
