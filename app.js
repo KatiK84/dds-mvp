@@ -60,8 +60,49 @@ const SAMPLE_OPERATIONS = `Дата;Контрагент;Статья ДДС;С�
 
 const STORAGE_ARTICLES_KEY = "dds_mvp_articles_v2";
 const STORAGE_BANKS_KEY = "dds_mvp_banks_v1";
+const STORAGE_ACCESS_KEY = "dds_mvp_access_v1";
 const UNKNOWN_ARTICLE = "Статья неизвестна";
 const UNKNOWN_ACTIVITY = "03 Финансовая деятельность";
+const ROLE_CONFIG = {
+  ADMIN: {
+    label: "Админ",
+    rightsLabel: "Полный доступ: настройки, загрузка, разнесение, редактирование справочника.",
+    permissions: [
+      "report.import",
+      "report.export",
+      "reconcile.assign",
+      "reconcile.export",
+      "banks.structure",
+      "banks.statement.upload",
+      "banks.statement.profile",
+      "banks.opening.manage",
+      "banks.statement.removeMonth",
+      "banks.account.status",
+      "articles.manage",
+      "articles.export",
+    ],
+  },
+  OPERATOR: {
+    label: "Оператор",
+    rightsLabel: "Операционная работа: загрузка выписок/операций, ручное разнесение, без админ-настроек.",
+    permissions: [
+      "report.import",
+      "report.export",
+      "reconcile.assign",
+      "reconcile.export",
+      "banks.statement.upload",
+      "banks.statement.profile",
+      "banks.opening.manage",
+      "banks.statement.removeMonth",
+      "articles.export",
+    ],
+  },
+  VIEWER: {
+    label: "Просмотр",
+    rightsLabel: "Только просмотр и выгрузки, без изменений данных.",
+    permissions: ["report.export", "reconcile.export", "articles.export"],
+  },
+};
 const BANK_PARSER_PROFILES = [
   { value: "auto", label: "Автоопределение" },
   { value: "deutsche", label: "Deutsche Bank" },
@@ -73,6 +114,7 @@ const state = {
   activeTab: "report",
   articles: loadArticles(),
   banks: loadBanksState(),
+  access: loadAccessState(),
   banksUi: {
     search: "",
     status: "active",
@@ -88,6 +130,9 @@ const state = {
 
 const els = {
   tabs: document.querySelectorAll(".tab-btn"),
+  accessRoleSelect: document.getElementById("accessRoleSelect"),
+  accessApplyRole: document.getElementById("accessApplyRole"),
+  accessRoleHint: document.getElementById("accessRoleHint"),
   reportTab: document.getElementById("reportTab"),
   banksTab: document.getElementById("banksTab"),
   reconcileTab: document.getElementById("reconcileTab"),
@@ -148,6 +193,7 @@ init();
 function init() {
   cleanupLegacyPlaceholderEntities(true);
   bindTabs();
+  bindAccessEvents();
   bindReportEvents();
   bindBankEvents();
   bindReconcileEvents();
@@ -159,6 +205,7 @@ function init() {
   renderArticlesTable();
   renderReport();
   renderReconcileTable();
+  applyRoleAccess();
 }
 
 function bindTabs() {
@@ -180,9 +227,106 @@ function setActiveTab(tabName) {
   els.articlesTab.classList.toggle("active", tabName === "articles");
 }
 
+function bindAccessEvents() {
+  if (!els.accessRoleSelect || !els.accessApplyRole) return;
+  els.accessRoleSelect.value = state.access.currentRole;
+  els.accessApplyRole.addEventListener("click", () => {
+    const nextRole = String(els.accessRoleSelect.value || "").trim().toUpperCase();
+    setAccessRole(nextRole);
+  });
+}
+
+function setAccessRole(nextRole) {
+  const normalized = ROLE_CONFIG[nextRole] ? nextRole : "VIEWER";
+  const current = state.access.currentRole;
+  if (normalized === current) {
+    applyRoleAccess();
+    return;
+  }
+
+  const confirmed = window.confirm(`Сменить роль: ${roleLabel(current)} -> ${roleLabel(normalized)}?`);
+  if (!confirmed) {
+    els.accessRoleSelect.value = current;
+    return;
+  }
+
+  state.access.currentRole = normalized;
+  saveAccessState(state.access);
+  closeArticleForm();
+  renderBanksTab();
+  renderArticlesTable();
+  renderReport();
+  renderReconcileTable();
+  applyRoleAccess();
+}
+
+function hasPermission(permission) {
+  const role = ROLE_CONFIG[state.access.currentRole] ? state.access.currentRole : "VIEWER";
+  const permissions = ROLE_CONFIG[role].permissions || [];
+  return permissions.includes(permission);
+}
+
+function requirePermission(permission, denyText) {
+  if (hasPermission(permission)) return true;
+  if (denyText) alert(denyText);
+  return false;
+}
+
+function roleLabel(role) {
+  return ROLE_CONFIG[role]?.label || "Просмотр";
+}
+
+function applyRoleAccess() {
+  const role = ROLE_CONFIG[state.access.currentRole] ? state.access.currentRole : "VIEWER";
+  if (els.accessRoleSelect) {
+    els.accessRoleSelect.value = role;
+  }
+  if (els.accessRoleHint) {
+    els.accessRoleHint.textContent = `Роль: ${roleLabel(role)}. ${ROLE_CONFIG[role].rightsLabel}`;
+  }
+
+  const canImportReport = hasPermission("report.import");
+  const canExportReport = hasPermission("report.export");
+  const canManageBankStructure = hasPermission("banks.structure");
+  const canExportReconcile = hasPermission("reconcile.export");
+  const canManageArticles = hasPermission("articles.manage");
+  const canExportArticles = hasPermission("articles.export");
+
+  setElementDisabled(els.operationsFile, !canImportReport);
+  setElementDisabled(els.loadSampleBtn, !canImportReport);
+  setElementDisabled(els.downloadReportCsvBtn, !canExportReport);
+
+  setFormDisabled(els.legalEntityForm, !canManageBankStructure);
+  setFormDisabled(els.bankAccountForm, !canManageBankStructure);
+
+  setElementDisabled(els.downloadUnresolvedCsv, !canExportReconcile);
+
+  setElementDisabled(els.addArticleBtn, !canManageArticles);
+  setElementDisabled(els.downloadArticlesCsv, !canExportArticles);
+  if (!canManageArticles) {
+    closeArticleForm();
+  }
+}
+
+function setElementDisabled(el, disabled) {
+  if (!el) return;
+  el.disabled = Boolean(disabled);
+}
+
+function setFormDisabled(formEl, disabled) {
+  if (!formEl) return;
+  const controls = formEl.querySelectorAll("input, select, textarea, button");
+  controls.forEach((control) => {
+    control.disabled = Boolean(disabled);
+  });
+}
+
 function bindReportEvents() {
   els.operationsFile.addEventListener("change", onFileUploaded);
-  els.loadSampleBtn.addEventListener("click", () => loadOperationsFromText(SAMPLE_OPERATIONS, "пример"));
+  els.loadSampleBtn.addEventListener("click", () => {
+    if (!requirePermission("report.import", "Недостаточно прав: только Админ или Оператор могут загружать операции.")) return;
+    loadOperationsFromText(SAMPLE_OPERATIONS, "пример");
+  });
   els.downloadTemplateBtn.addEventListener("click", downloadTemplateCsv);
   els.dateFromInput.addEventListener("change", renderReport);
   els.dateToInput.addEventListener("change", renderReport);
@@ -317,6 +461,7 @@ function bindBankEvents() {
 
 function onAddLegalEntity(event) {
   event.preventDefault();
+  if (!requirePermission("banks.structure", "Недостаточно прав: только Админ может добавлять юрлица.")) return;
 
   const name = String(els.legalEntityNameInput.value || "").trim();
   if (!name) {
@@ -335,6 +480,7 @@ function onAddLegalEntity(event) {
 
 function onAddBankAccount(event) {
   event.preventDefault();
+  if (!requirePermission("banks.structure", "Недостаточно прав: только Админ может добавлять счета.")) return;
 
   const name = String(els.bankAccountNameInput.value || "").trim();
   const legalEntityId = Number(els.bankAccountEntitySelect.value);
@@ -367,6 +513,8 @@ function onAddBankAccount(event) {
 }
 
 function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "auto") {
+  if (!requirePermission("banks.statement.upload", "Недостаточно прав: роль не позволяет загружать выписки.")) return;
+
   const fileName = String(file?.name || "");
   const lowerName = fileName.toLowerCase();
   const looksLikeCsv = lowerName.endsWith(".csv");
@@ -437,6 +585,7 @@ function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "au
 }
 
 function setBankParserProfile(accountId, parserProfile) {
+  if (!requirePermission("banks.statement.profile", "Недостаточно прав: роль не позволяет менять профиль банка.")) return;
   const normalizedProfile = BANK_PARSER_PROFILES.some((item) => item.value === parserProfile) ? parserProfile : "auto";
   state.banks.accounts = state.banks.accounts.map((account) =>
     account.id === accountId ? { ...account, parserProfile: normalizedProfile } : account
@@ -445,6 +594,7 @@ function setBankParserProfile(accountId, parserProfile) {
 }
 
 function setManualOpeningBalance(accountId, monthKey, amountRaw) {
+  if (!requirePermission("banks.opening.manage", "Недостаточно прав: роль не позволяет менять ручные остатки.")) return;
   const normalizedMonth = normalizeMonthKey(monthKey);
   if (!normalizedMonth) {
     alert("Выберите месяц для ручного остатка.");
@@ -474,6 +624,7 @@ function setManualOpeningBalance(accountId, monthKey, amountRaw) {
 }
 
 function clearManualOpeningBalance(accountId, monthKey) {
+  if (!requirePermission("banks.opening.manage", "Недостаточно прав: роль не позволяет менять ручные остатки.")) return;
   const normalizedMonth = normalizeMonthKey(monthKey);
   if (!normalizedMonth) {
     alert("Выберите месяц для очистки ручного остатка.");
@@ -537,6 +688,7 @@ function rebuildAccountFromMonthlyStatements(account, monthlyStatements) {
 }
 
 function removeMonthlyStatement(accountId, monthKey) {
+  if (!requirePermission("banks.statement.removeMonth", "Недостаточно прав: роль не позволяет удалять месяцы выписок.")) return;
   const normalizedMonth = normalizeMonthKey(monthKey);
   if (!normalizedMonth) return;
 
@@ -570,6 +722,7 @@ function removeMonthlyStatement(accountId, monthKey) {
 }
 
 function deleteBankAccountSafely(accountId) {
+  if (!requirePermission("banks.account.status", "Недостаточно прав: только Админ может удалять банки.")) return;
   const account = state.banks.accounts.find((item) => item.id === accountId);
   if (!account || account.status === "DELETED") return;
 
@@ -595,6 +748,7 @@ function deleteBankAccountSafely(accountId) {
 }
 
 function restoreBankAccount(accountId) {
+  if (!requirePermission("banks.account.status", "Недостаточно прав: только Админ может восстанавливать банки.")) return;
   const account = state.banks.accounts.find((item) => item.id === accountId);
   if (!account || account.status !== "DELETED") return;
 
@@ -847,6 +1001,12 @@ function renderBanksTab() {
 }
 
 function renderBanksEntityBlocks(entitySummaries, visibleAccountIds) {
+  const canChangeProfile = hasPermission("banks.statement.profile");
+  const canUploadStatement = hasPermission("banks.statement.upload");
+  const canManageOpening = hasPermission("banks.opening.manage");
+  const canRemoveMonth = hasPermission("banks.statement.removeMonth");
+  const canManageAccountStatus = hasPermission("banks.account.status");
+
   const hasAnyAccounts = entitySummaries.some(({ accounts }) => accounts.length > 0);
   const hasVisibleAccounts = [...visibleAccountIds].length > 0;
 
@@ -890,7 +1050,9 @@ function renderBanksEntityBlocks(entitySummaries, visibleAccountIds) {
                         ${
                           isDeleted
                             ? ""
-                            : `<button type="button" class="inline-link danger" data-bank-action="remove-month" data-account-id="${account.id}" data-month="${month}">Удалить</button>`
+                            : canRemoveMonth
+                              ? `<button type="button" class="inline-link danger" data-bank-action="remove-month" data-account-id="${account.id}" data-month="${month}">Удалить</button>`
+                              : ""
                         }
                       </span>`
                   )
@@ -924,9 +1086,11 @@ function renderBanksEntityBlocks(entitySummaries, visibleAccountIds) {
                       ${isExpanded ? "Свернуть" : "Развернуть"}
                     </button>
                     ${
-                      isDeleted
-                        ? `<button type="button" class="secondary" data-bank-action="restore" data-account-id="${account.id}">Восстановить</button>`
-                        : `<button type="button" class="secondary" data-bank-action="delete" data-account-id="${account.id}">Удалить</button>`
+                      !canManageAccountStatus
+                        ? ""
+                        : isDeleted
+                          ? `<button type="button" class="secondary" data-bank-action="restore" data-account-id="${account.id}">Восстановить</button>`
+                          : `<button type="button" class="secondary" data-bank-action="delete" data-account-id="${account.id}">Удалить</button>`
                     }
                   </div>
                 </div>
@@ -937,12 +1101,12 @@ function renderBanksEntityBlocks(entitySummaries, visibleAccountIds) {
                     type="month"
                     data-bank-month="${account.id}"
                     value="${defaultUploadMonth}"
-                    ${isDeleted ? "disabled" : ""}
+                    ${isDeleted || !canUploadStatement ? "disabled" : ""}
                   />
-                  <select data-bank-parser data-account-id="${account.id}" ${isDeleted ? "disabled" : ""}>
+                  <select data-bank-parser data-account-id="${account.id}" ${isDeleted || !canChangeProfile ? "disabled" : ""}>
                     ${parserOptions}
                   </select>
-                  <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" ${isDeleted ? "disabled" : ""} />
+                  <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" ${isDeleted || !canUploadStatement ? "disabled" : ""} />
                   <span class="bank-status">${status}</span>
                 </div>
                 <div class="bank-manual-opening">
@@ -952,7 +1116,7 @@ function renderBanksEntityBlocks(entitySummaries, visibleAccountIds) {
                     data-bank-opening-month
                     data-account-id="${account.id}"
                     value="${defaultManualOpeningMonth}"
-                    ${isDeleted ? "disabled" : ""}
+                    ${isDeleted || !canManageOpening ? "disabled" : ""}
                   />
                   <input
                     type="text"
@@ -960,15 +1124,15 @@ function renderBanksEntityBlocks(entitySummaries, visibleAccountIds) {
                     data-account-id="${account.id}"
                     placeholder="например 12500,00"
                     value="${Number.isFinite(manualOpeningValue) ? formatNumberForInput(manualOpeningValue) : ""}"
-                    ${isDeleted ? "disabled" : ""}
+                    ${isDeleted || !canManageOpening ? "disabled" : ""}
                   />
                   <button type="button" class="secondary" data-bank-action="save-opening" data-account-id="${account.id}" ${
-                    isDeleted ? "disabled" : ""
+                    isDeleted || !canManageOpening ? "disabled" : ""
                   }>
                     Сохранить
                   </button>
                   <button type="button" class="secondary" data-bank-action="clear-opening" data-account-id="${account.id}" ${
-                    isDeleted ? "disabled" : ""
+                    isDeleted || !canManageOpening ? "disabled" : ""
                   }>
                     Очистить
                   </button>
@@ -1321,7 +1485,10 @@ function bindArticleEvents() {
   els.articleGroupFilter.addEventListener("change", renderArticlesTable);
   els.articleActivityFilter.addEventListener("change", renderArticlesTable);
   els.articleStatusFilter.addEventListener("change", renderArticlesTable);
-  els.addArticleBtn.addEventListener("click", () => openArticleForm());
+  els.addArticleBtn.addEventListener("click", () => {
+    if (!requirePermission("articles.manage", "Недостаточно прав: роль не позволяет редактировать справочник статей.")) return;
+    openArticleForm();
+  });
   els.downloadArticlesCsv.addEventListener("click", downloadArticlesCsv);
   els.cancelArticleEdit.addEventListener("click", closeArticleForm);
   els.articleForm.addEventListener("submit", onArticleFormSubmit);
@@ -1334,28 +1501,37 @@ function bindArticleEvents() {
     const id = Number(button.dataset.id);
 
     if (action === "edit") {
+      if (!requirePermission("articles.manage", "Недостаточно прав: роль не позволяет редактировать статьи.")) return;
       const article = state.articles.find((item) => item.id === id);
       if (article) openArticleForm(article);
       return;
     }
 
     if (action === "rename") {
+      if (!requirePermission("articles.manage", "Недостаточно прав: роль не позволяет переименовывать статьи.")) return;
       renameArticle(id);
       return;
     }
 
     if (action === "delete") {
+      if (!requirePermission("articles.manage", "Недостаточно прав: роль не позволяет удалять статьи.")) return;
       markArticleDeleted(id);
       return;
     }
 
     if (action === "restore") {
+      if (!requirePermission("articles.manage", "Недостаточно прав: роль не позволяет восстанавливать статьи.")) return;
       restoreArticle(id);
     }
   });
 }
 
 function onFileUploaded(event) {
+  if (!requirePermission("report.import", "Недостаточно прав: только Админ или Оператор могут загружать операции.")) {
+    event.target.value = "";
+    return;
+  }
+
   const [file] = event.target.files || [];
   if (!file) return;
 
@@ -1706,12 +1882,13 @@ function renderMonthTable(monthRows) {
 function renderReconcileTable() {
   if (!els.reconcileTableBody || !els.reconcileStatus) return;
 
+  const canAssign = hasPermission("reconcile.assign");
   const operations = getOperationsForReconcile();
   const showOnlyUnresolved = Boolean(els.unresolvedOnly.checked);
   const rows = showOnlyUnresolved ? operations.filter((op) => op.unresolved) : operations;
 
   const unresolvedTotal = operations.filter((op) => op.unresolved).length;
-  els.reconcileStatus.textContent = `Операций: ${operations.length}. Неразнесенных: ${unresolvedTotal}.`;
+  els.reconcileStatus.textContent = `Операций: ${operations.length}. Неразнесенных: ${unresolvedTotal}.${canAssign ? "" : " Режим только просмотра."}`;
 
   if (rows.length === 0) {
     els.reconcileTableBody.innerHTML = `<tr><td colspan="8" class="empty">Нет строк для отображения.</td></tr>`;
@@ -1734,7 +1911,7 @@ function renderReconcileTable() {
         <td>${formatMoney(op.direction === "Выбытие" ? -op.amount : op.amount)}</td>
         <td>${escapeHtml(op.direction)}</td>
         <td>
-          <select data-row-id="${op.rowId}">
+          <select data-row-id="${op.rowId}" ${canAssign ? "" : "disabled"}>
             <option value="" ${selectedOptionValue === "" ? "selected" : ""}>Не выбрано</option>
             ${articleOptions
               .map(
@@ -1744,7 +1921,7 @@ function renderReconcileTable() {
               .join("")}
           </select>
         </td>
-        <td><button type="button" class="secondary" data-action="assign" data-id="${op.rowId}">Применить</button></td>
+        <td><button type="button" class="secondary" data-action="assign" data-id="${op.rowId}" ${canAssign ? "" : "disabled"}>Применить</button></td>
       </tr>`;
     })
     .join("");
@@ -1765,6 +1942,7 @@ function getArticleOptionsForSelect() {
 }
 
 function applyManualAssignment(rowId) {
+  if (!requirePermission("reconcile.assign", "Недостаточно прав: роль не позволяет разносить платежи вручную.")) return;
   const selectEl = els.reconcileTableBody.querySelector(`select[data-row-id="${rowId}"]`);
   if (!selectEl) return;
 
@@ -1779,6 +1957,7 @@ function applyManualAssignment(rowId) {
 }
 
 function downloadUnresolvedCsv() {
+  if (!requirePermission("reconcile.export", "Недостаточно прав: роль не позволяет выгружать неразнесенные операции.")) return;
   const unresolved = getOperationsForReconcile().filter((op) => op.unresolved);
 
   if (unresolved.length === 0) {
@@ -1840,6 +2019,7 @@ function refreshReportActivityOptions() {
 }
 
 function renderArticlesTable() {
+  const canManageArticles = hasPermission("articles.manage");
   const rows = getFilteredArticles();
 
   if (rows.length === 0) {
@@ -1860,12 +2040,12 @@ function renderArticlesTable() {
         <td><span class="badge ${row.status}">${statusLabel(row.status)}</span></td>
         <td>
           <div class="actions">
-            <button class="secondary" type="button" data-action="edit" data-id="${row.id}">Редакт.</button>
-            <button class="secondary" type="button" data-action="rename" data-id="${row.id}">Переим.</button>
+            <button class="secondary" type="button" data-action="edit" data-id="${row.id}" ${canManageArticles ? "" : "disabled"}>Редакт.</button>
+            <button class="secondary" type="button" data-action="rename" data-id="${row.id}" ${canManageArticles ? "" : "disabled"}>Переим.</button>
             ${
               row.status === "DELETE"
-                ? `<button class="secondary" type="button" data-action="restore" data-id="${row.id}">Восстановить</button>`
-                : `<button class="secondary" type="button" data-action="delete" data-id="${row.id}">Удалить</button>`
+                ? `<button class="secondary" type="button" data-action="restore" data-id="${row.id}" ${canManageArticles ? "" : "disabled"}>Восстановить</button>`
+                : `<button class="secondary" type="button" data-action="delete" data-id="${row.id}" ${canManageArticles ? "" : "disabled"}>Удалить</button>`
             }
           </div>
         </td>
@@ -1920,6 +2100,7 @@ function updateSelectOptions(selectElement, values) {
 }
 
 function openArticleForm(article) {
+  if (!hasPermission("articles.manage")) return;
   els.articleForm.classList.remove("hidden");
 
   if (!article) {
@@ -1954,6 +2135,7 @@ function closeArticleForm() {
 
 function onArticleFormSubmit(event) {
   event.preventDefault();
+  if (!requirePermission("articles.manage", "Недостаточно прав: роль не позволяет сохранять изменения статей.")) return;
 
   const id = Number(els.articleId.value);
   const name = els.articleNameInput.value.trim();
@@ -1989,6 +2171,7 @@ function onArticleFormSubmit(event) {
 }
 
 function renameArticle(id) {
+  if (!hasPermission("articles.manage")) return;
   const article = state.articles.find((item) => item.id === id);
   if (!article) return;
 
@@ -2009,6 +2192,7 @@ function renameArticle(id) {
 }
 
 function markArticleDeleted(id) {
+  if (!hasPermission("articles.manage")) return;
   const article = state.articles.find((item) => item.id === id);
   if (!article) return;
 
@@ -2023,6 +2207,7 @@ function markArticleDeleted(id) {
 }
 
 function restoreArticle(id) {
+  if (!hasPermission("articles.manage")) return;
   state.articles = state.articles.map((item) => (item.id === id ? { ...item, status: "ACTIVE" } : item));
   persistAndRerenderAfterArticleChange();
 }
@@ -2056,6 +2241,7 @@ function downloadTemplateCsv() {
 }
 
 function downloadReportCsv() {
+  if (!requirePermission("report.export", "Недостаточно прав: роль не позволяет выгружать отчет ДДС.")) return;
   if (state.reportRows.length === 0) {
     els.fileStatus.textContent = "Сначала загрузите операции CSV, затем выгружайте отчет.";
     return;
@@ -2082,6 +2268,7 @@ function downloadReportCsv() {
 }
 
 function downloadArticlesCsv() {
+  if (!requirePermission("articles.export", "Недостаточно прав: роль не позволяет выгружать справочник статей.")) return;
   const headers = [
     "№ статьи",
     "Статья ДДС",
@@ -2180,6 +2367,32 @@ function saveArticles(articles) {
     localStorage.setItem(STORAGE_ARTICLES_KEY, JSON.stringify(articles));
   } catch (error) {
     console.warn("Cannot save articles to localStorage", error);
+  }
+}
+
+function loadAccessState() {
+  const fallback = { currentRole: "ADMIN" };
+
+  try {
+    const raw = localStorage.getItem(STORAGE_ACCESS_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return fallback;
+    const role = String(parsed.currentRole || "").trim().toUpperCase();
+    return {
+      currentRole: ROLE_CONFIG[role] ? role : fallback.currentRole,
+    };
+  } catch (error) {
+    console.warn("Cannot load access state from localStorage", error);
+    return fallback;
+  }
+}
+
+function saveAccessState(accessState) {
+  try {
+    localStorage.setItem(STORAGE_ACCESS_KEY, JSON.stringify(accessState));
+  } catch (error) {
+    console.warn("Cannot save access state to localStorage", error);
   }
 }
 

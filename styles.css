@@ -45,6 +45,14 @@ body {
   flex-wrap: wrap;
 }
 
+.access-card {
+  margin-top: 16px;
+}
+
+.access-grid {
+  grid-template-columns: minmax(220px, 320px) minmax(180px, 220px);
+}
+
 .tab-btn {
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -531,7 +539,8 @@ tr.unresolved-row {
 @media (max-width: 900px) {
   .import-actions,
   .form-grid,
-  .banks-filter-grid {
+  .banks-filter-grid,
+  .access-grid {
     grid-template-columns: 1fr;
   }
 

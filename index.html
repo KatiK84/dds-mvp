@@ -13,6 +13,22 @@
         <p>Загрузите операции, получите ДДС и управляйте справочником статей на отдельной вкладке.</p>
       </header>
 
+      <section class="card access-card">
+        <h2>Роли и права</h2>
+        <div class="controls-grid access-grid">
+          <label>
+            Текущая роль
+            <select id="accessRoleSelect">
+              <option value="ADMIN">Админ</option>
+              <option value="OPERATOR">Оператор</option>
+              <option value="VIEWER">Просмотр</option>
+            </select>
+          </label>
+          <button id="accessApplyRole" type="button">Применить роль</button>
+        </div>
+        <p id="accessRoleHint" class="status"></p>
+      </section>
+
       <nav class="tabs" aria-label="Разделы приложения">
         <button class="tab-btn active" data-tab="report">Отчет ДДС</button>
         <button class="tab-btn" data-tab="reconcile">Разнесение платежей</button>
