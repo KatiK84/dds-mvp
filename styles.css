@@ -158,6 +158,25 @@ button.secondary {
   align-items: end;
 }
 
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+}
+
+.inline-form button {
+  width: fit-content;
+}
+
 .article-form {
   margin-top: 12px;
   margin-bottom: 12px;
@@ -257,6 +276,65 @@ tr.grand-total {
 
 tr.unresolved-row {
   background: var(--danger-soft);
+}
+
+.banks-entities {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.bank-entity-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+}
+
+.bank-entity-card h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.bank-accounts {
+  display: grid;
+  gap: 8px;
+}
+
+.bank-account-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fbfcfb;
+}
+
+.bank-account-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bank-account-name {
+  font-weight: 600;
+}
+
+.bank-upload {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.bank-upload input[type="file"] {
+  max-width: 320px;
+}
+
+.bank-status {
+  color: var(--muted);
+  font-size: 0.84rem;
 }
 
 .actions {

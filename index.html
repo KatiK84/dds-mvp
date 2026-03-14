@@ -15,6 +15,7 @@
 
       <nav class="tabs" aria-label="Разделы приложения">
         <button class="tab-btn active" data-tab="report">Отчет ДДС</button>
+        <button class="tab-btn" data-tab="banks">Банки</button>
         <button class="tab-btn" data-tab="reconcile">Разнесение платежей</button>
         <button class="tab-btn" data-tab="articles">Статьи ДДС</button>
       </nav>
@@ -138,6 +139,74 @@
                 </tr>
               </thead>
               <tbody id="reconcileTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="banksTab">
+        <section class="card">
+          <h2>Настройка банков</h2>
+          <div class="settings-grid">
+            <form id="legalEntityForm" class="inline-form">
+              <label>
+                Новое юрлицо
+                <input id="legalEntityNameInput" type="text" placeholder="ООО Пример" />
+              </label>
+              <button type="submit">Добавить юрлицо</button>
+            </form>
+
+            <form id="bankAccountForm" class="inline-form">
+              <label>
+                Название счета/банка
+                <input id="bankAccountNameInput" type="text" placeholder="Deutsche Bank EUR" />
+              </label>
+              <label>
+                Юрлицо
+                <select id="bankAccountEntitySelect"></select>
+              </label>
+              <button type="submit">Добавить счет</button>
+            </form>
+          </div>
+        </section>
+
+        <section class="table-card">
+          <h2>Сводка по юрлицам</h2>
+          <div class="table-wrap small">
+            <table>
+              <thead>
+                <tr>
+                  <th>Юрлицо</th>
+                  <th>Начало месяца</th>
+                  <th>Конец месяца</th>
+                  <th>Последняя дата</th>
+                  <th>Остаток на последнюю дату</th>
+                  <th>Поступления</th>
+                  <th>Выбытия</th>
+                </tr>
+              </thead>
+              <tbody id="banksEntitySummaryBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="banksEntityBlocks" class="banks-entities"></section>
+
+        <section class="table-card">
+          <h2>Консолидировано по всем юрлицам</h2>
+          <div class="table-wrap small">
+            <table>
+              <thead>
+                <tr>
+                  <th>Начало месяца</th>
+                  <th>Конец месяца</th>
+                  <th>Последняя дата</th>
+                  <th>Остаток на последнюю дату</th>
+                  <th>Поступления</th>
+                  <th>Выбытия</th>
+                </tr>
+              </thead>
+              <tbody id="banksGlobalSummaryBody"></tbody>
             </table>
           </div>
         </section>

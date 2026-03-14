@@ -59,12 +59,14 @@ const SAMPLE_OPERATIONS = `Дата;Контрагент;Статья ДДС;С�
 2026-03-18;Bank XYZ;;-5000;Выбытие;Погашение кредита`;
 
 const STORAGE_ARTICLES_KEY = "dds_mvp_articles_v2";
+const STORAGE_BANKS_KEY = "dds_mvp_banks_v1";
 const UNKNOWN_ARTICLE = "Статья неизвестна";
 const UNKNOWN_ACTIVITY = "03 Финансовая деятельность";
 
 const state = {
   activeTab: "report",
   articles: loadArticles(),
+  banks: loadBanksState(),
   operationsRaw: [],
   manualAssignments: {},
   filteredOperations: [],
@@ -75,8 +77,17 @@ const state = {
 const els = {
   tabs: document.querySelectorAll(".tab-btn"),
   reportTab: document.getElementById("reportTab"),
+  banksTab: document.getElementById("banksTab"),
   reconcileTab: document.getElementById("reconcileTab"),
   articlesTab: document.getElementById("articlesTab"),
+  legalEntityForm: document.getElementById("legalEntityForm"),
+  legalEntityNameInput: document.getElementById("legalEntityNameInput"),
+  bankAccountForm: document.getElementById("bankAccountForm"),
+  bankAccountNameInput: document.getElementById("bankAccountNameInput"),
+  bankAccountEntitySelect: document.getElementById("bankAccountEntitySelect"),
+  banksEntitySummaryBody: document.getElementById("banksEntitySummaryBody"),
+  banksEntityBlocks: document.getElementById("banksEntityBlocks"),
+  banksGlobalSummaryBody: document.getElementById("banksGlobalSummaryBody"),
   operationsFile: document.getElementById("operationsFile"),
   loadSampleBtn: document.getElementById("loadSampleBtn"),
   downloadTemplateBtn: document.getElementById("downloadTemplateBtn"),
@@ -118,10 +129,13 @@ init();
 function init() {
   bindTabs();
   bindReportEvents();
+  bindBankEvents();
   bindReconcileEvents();
   bindArticleEvents();
+  refreshBankEntitySelect();
   refreshArticleFilterOptions();
   refreshReportActivityOptions();
+  renderBanksTab();
   renderArticlesTable();
   renderReport();
   renderReconcileTable();
@@ -141,6 +155,7 @@ function setActiveTab(tabName) {
   });
 
   els.reportTab.classList.toggle("active", tabName === "report");
+  els.banksTab.classList.toggle("active", tabName === "banks");
   els.reconcileTab.classList.toggle("active", tabName === "reconcile");
   els.articlesTab.classList.toggle("active", tabName === "articles");
 }
@@ -154,6 +169,390 @@ function bindReportEvents() {
   els.activityFilter.addEventListener("change", renderReport);
   els.resetFiltersBtn.addEventListener("click", resetReportFilters);
   els.downloadReportCsvBtn.addEventListener("click", downloadReportCsv);
+}
+
+function bindBankEvents() {
+  els.legalEntityForm.addEventListener("submit", onAddLegalEntity);
+  els.bankAccountForm.addEventListener("submit", onAddBankAccount);
+
+  els.banksEntityBlocks.addEventListener("change", (event) => {
+    const input = event.target.closest("input[data-bank-upload='1']");
+    if (!input) return;
+
+    const accountId = Number(input.dataset.accountId);
+    const [file] = input.files || [];
+    if (!file) return;
+
+    uploadBankStatement(accountId, file);
+  });
+}
+
+function onAddLegalEntity(event) {
+  event.preventDefault();
+
+  const name = String(els.legalEntityNameInput.value || "").trim();
+  if (!name) {
+    alert("Введите название юрлица.");
+    return;
+  }
+
+  state.banks.legalEntities.push({
+    id: getNextId(state.banks.legalEntities),
+    name,
+  });
+
+  els.legalEntityNameInput.value = "";
+  persistBanksAndRender();
+}
+
+function onAddBankAccount(event) {
+  event.preventDefault();
+
+  const name = String(els.bankAccountNameInput.value || "").trim();
+  const legalEntityId = Number(els.bankAccountEntitySelect.value);
+
+  if (!name) {
+    alert("Введите название счета.");
+    return;
+  }
+
+  if (!legalEntityId) {
+    alert("Выберите юрлицо.");
+    return;
+  }
+
+  state.banks.accounts.push({
+    id: getNextId(state.banks.accounts),
+    legalEntityId,
+    name,
+    fileName: "",
+    transactions: [],
+    summary: null,
+  });
+
+  els.bankAccountNameInput.value = "";
+  persistBanksAndRender();
+}
+
+function uploadBankStatement(accountId, file) {
+  const reader = new FileReader();
+
+  reader.onload = () => {
+    try {
+      const transactions = parseBankStatementCsv(String(reader.result || ""));
+      const summary = summarizeBankTransactions(transactions);
+
+      state.banks.accounts = state.banks.accounts.map((account) =>
+        account.id === accountId
+          ? {
+              ...account,
+              fileName: file.name,
+              transactions,
+              summary,
+            }
+          : account
+      );
+
+      persistBanksAndRender();
+    } catch (error) {
+      alert(`Ошибка загрузки выписки: ${error.message}`);
+    }
+  };
+
+  reader.onerror = () => {
+    alert("Не удалось прочитать файл выписки.");
+  };
+
+  reader.readAsText(file, "utf-8");
+}
+
+function parseBankStatementCsv(text) {
+  const cleanText = text.replace(/^\uFEFF/, "").trim();
+  if (!cleanText) throw new Error("CSV выписки пустой.");
+
+  const firstLine = cleanText.split("\n")[0] || "";
+  const delimiter = (firstLine.match(/;/g) || []).length >= (firstLine.match(/,/g) || []).length ? ";" : ",";
+  const rows = parseCsv(cleanText, delimiter);
+
+  if (rows.length < 2) throw new Error("В выписке нет данных.");
+
+  const headers = rows[0].map((header) => normalizeText(header));
+  const idxDate = findColumn(headers, ["дата", "date", "booking"]);
+  const idxAmount = findColumn(headers, ["сумма", "amount", "betrag", "umsatz"]);
+  const idxDebit = findColumn(headers, ["списан", "debit", "расход", "выбыт"]);
+  const idxCredit = findColumn(headers, ["зачисл", "credit", "приход", "поступ"]);
+  const idxBalance = findColumn(headers, ["баланс", "остаток", "balance", "saldo"]);
+
+  if (idxDate === -1) throw new Error("Не найдена колонка даты.");
+  if (idxAmount === -1 && idxDebit === -1 && idxCredit === -1) {
+    throw new Error("Не найдена колонка суммы/дебет/кредит.");
+  }
+
+  return rows
+    .slice(1)
+    .map((cells, index) => {
+      const dateRaw = String(cells[idxDate] || "").trim();
+      const dateObj = parseFlexibleDate(dateRaw);
+      if (!dateObj) throw new Error(`Неверная дата в строке ${index + 2}: ${dateRaw}`);
+
+      let amount = null;
+      if (idxAmount >= 0) {
+        amount = parseAmount(String(cells[idxAmount] || ""));
+      }
+
+      if (amount === null && (idxDebit >= 0 || idxCredit >= 0)) {
+        const debit = parseAmount(String(cells[idxDebit] || "")) || 0;
+        const credit = parseAmount(String(cells[idxCredit] || "")) || 0;
+        amount = credit - Math.abs(debit);
+      }
+
+      if (amount === null || !Number.isFinite(amount)) {
+        throw new Error(`Неверная сумма в строке ${index + 2}.`);
+      }
+
+      const balance = idxBalance >= 0 ? parseAmount(String(cells[idxBalance] || "")) : null;
+
+      return {
+        idx: index,
+        dateObj,
+        amount,
+        balance: Number.isFinite(balance) ? balance : null,
+      };
+    })
+    .sort((a, b) => {
+      const byDate = a.dateObj.getTime() - b.dateObj.getTime();
+      return byDate !== 0 ? byDate : a.idx - b.idx;
+    });
+}
+
+function summarizeBankTransactions(transactions) {
+  if (!transactions || transactions.length === 0) {
+    return null;
+  }
+
+  const latest = transactions[transactions.length - 1];
+  const monthStart = new Date(latest.dateObj.getFullYear(), latest.dateObj.getMonth(), 1);
+
+  const inMonth = transactions.filter((tx) => tx.dateObj >= monthStart);
+  const latestInMonthWithBalance = [...inMonth].reverse().find((tx) => tx.balance !== null) || null;
+  const latestOverallWithBalance = [...transactions].reverse().find((tx) => tx.balance !== null) || null;
+  const beforeMonthWithBalance = [...transactions]
+    .filter((tx) => tx.dateObj < monthStart && tx.balance !== null)
+    .at(-1);
+  const firstMonthWithBalance = inMonth.find((tx) => tx.balance !== null) || null;
+
+  let openingBalance = null;
+  if (beforeMonthWithBalance) {
+    openingBalance = beforeMonthWithBalance.balance;
+  } else if (firstMonthWithBalance) {
+    openingBalance = firstMonthWithBalance.balance - firstMonthWithBalance.amount;
+  }
+
+  const monthEndBalance = latestInMonthWithBalance ? latestInMonthWithBalance.balance : null;
+  const latestBalance = latestOverallWithBalance ? latestOverallWithBalance.balance : null;
+
+  const inflow = inMonth.filter((tx) => tx.amount > 0).reduce((sum, tx) => sum + tx.amount, 0);
+  const outflow = inMonth
+    .filter((tx) => tx.amount < 0)
+    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+
+  return {
+    monthStartDate: monthStart,
+    latestDate: latest.dateObj,
+    openingBalance,
+    monthEndBalance,
+    latestBalance,
+    inflow,
+    outflow,
+  };
+}
+
+function renderBanksTab() {
+  refreshBankEntitySelect();
+
+  const entitySummaries = state.banks.legalEntities.map((entity) => {
+    const accounts = state.banks.accounts.filter((account) => account.legalEntityId === entity.id);
+    return {
+      entity,
+      accounts,
+      summary: summarizeEntity(accounts),
+    };
+  });
+
+  renderBanksEntityBlocks(entitySummaries);
+  renderBanksEntitySummaryTable(entitySummaries);
+  renderBanksGlobalSummary(entitySummaries);
+}
+
+function renderBanksEntityBlocks(entitySummaries) {
+  els.banksEntityBlocks.innerHTML = entitySummaries
+    .map(({ entity, accounts, summary }) => {
+      const accountsHtml =
+        accounts.length === 0
+          ? `<div class="empty">Пока нет добавленных счетов.</div>`
+          : accounts
+              .map((account) => {
+                const status = account.summary
+                  ? `Файл: ${escapeHtml(account.fileName)}. Последняя дата: ${formatDate(account.summary.latestDate)}`
+                  : "Выписка не загружена.";
+
+                return `
+                <article class="bank-account-card">
+                  <div class="bank-account-head">
+                    <div class="bank-account-name">${escapeHtml(account.name)}</div>
+                  </div>
+                  <div class="bank-upload">
+                    <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" />
+                    <span class="bank-status">${status}</span>
+                  </div>
+                </article>`;
+              })
+              .join("");
+
+      return `
+      <section class="bank-entity-card">
+        <h3>${escapeHtml(entity.name)}</h3>
+        <div class="bank-accounts">${accountsHtml}</div>
+        ${renderMiniSummaryTable(summary)}
+      </section>`;
+    })
+    .join("");
+}
+
+function renderMiniSummaryTable(summary) {
+  if (!summary) {
+    return `<div class="empty">Нет данных для расчета.</div>`;
+  }
+
+  return `
+    <div class="table-wrap small">
+      <table>
+        <thead>
+          <tr>
+            <th>Начало месяца</th>
+            <th>Конец месяца</th>
+            <th>Последняя дата</th>
+            <th>Остаток на последнюю дату</th>
+            <th>Поступления</th>
+            <th>Выбытия</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>${formatMaybeMoney(summary.openingBalance)}</td>
+            <td>${formatMaybeMoney(summary.monthEndBalance)}</td>
+            <td>${formatDate(summary.latestDate)}</td>
+            <td>${formatMaybeMoney(summary.latestBalance)}</td>
+            <td>${formatMoney(summary.inflow)}</td>
+            <td>${formatMoney(summary.outflow)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderBanksEntitySummaryTable(entitySummaries) {
+  const rows = entitySummaries
+    .map(({ entity, summary }) => {
+      if (!summary) {
+        return `
+        <tr>
+          <td>${escapeHtml(entity.name)}</td>
+          <td>н/д</td>
+          <td>н/д</td>
+          <td>н/д</td>
+          <td>н/д</td>
+          <td>${formatMoney(0)}</td>
+          <td>${formatMoney(0)}</td>
+        </tr>`;
+      }
+
+      return `
+      <tr>
+        <td>${escapeHtml(entity.name)}</td>
+        <td>${formatMaybeMoney(summary.openingBalance)}</td>
+        <td>${formatMaybeMoney(summary.monthEndBalance)}</td>
+        <td>${formatDate(summary.latestDate)}</td>
+        <td>${formatMaybeMoney(summary.latestBalance)}</td>
+        <td>${formatMoney(summary.inflow)}</td>
+        <td>${formatMoney(summary.outflow)}</td>
+      </tr>`;
+    })
+    .join("");
+
+  els.banksEntitySummaryBody.innerHTML =
+    rows || `<tr><td colspan="7" class="empty">Нет данных по юрлицам.</td></tr>`;
+}
+
+function renderBanksGlobalSummary(entitySummaries) {
+  const globalSummary = summarizeEntity(
+    entitySummaries.flatMap(({ accounts }) => accounts)
+  );
+
+  if (!globalSummary) {
+    els.banksGlobalSummaryBody.innerHTML = `<tr><td colspan="6" class="empty">Нет данных.</td></tr>`;
+    return;
+  }
+
+  els.banksGlobalSummaryBody.innerHTML = `
+    <tr class="grand-total">
+      <td>${formatMaybeMoney(globalSummary.openingBalance)}</td>
+      <td>${formatMaybeMoney(globalSummary.monthEndBalance)}</td>
+      <td>${formatDate(globalSummary.latestDate)}</td>
+      <td>${formatMaybeMoney(globalSummary.latestBalance)}</td>
+      <td>${formatMoney(globalSummary.inflow)}</td>
+      <td>${formatMoney(globalSummary.outflow)}</td>
+    </tr>
+  `;
+}
+
+function summarizeEntity(accounts) {
+  const summaries = accounts.map((acc) => acc.summary).filter(Boolean);
+  if (summaries.length === 0) return null;
+
+  return {
+    openingBalance: sumMaybeValues(summaries.map((item) => item.openingBalance)),
+    monthEndBalance: sumMaybeValues(summaries.map((item) => item.monthEndBalance)),
+    latestBalance: sumMaybeValues(summaries.map((item) => item.latestBalance)),
+    inflow: summaries.reduce((sum, item) => sum + item.inflow, 0),
+    outflow: summaries.reduce((sum, item) => sum + item.outflow, 0),
+    latestDate: summaries
+      .map((item) => item.latestDate)
+      .sort((a, b) => a.getTime() - b.getTime())
+      .at(-1),
+  };
+}
+
+function sumMaybeValues(values) {
+  const defined = values.filter((value) => Number.isFinite(value));
+  if (defined.length === 0) return null;
+  return defined.reduce((sum, value) => sum + value, 0);
+}
+
+function persistBanksAndRender() {
+  saveBanksState(state.banks);
+  renderBanksTab();
+}
+
+function refreshBankEntitySelect() {
+  const selected = Number(els.bankAccountEntitySelect.value) || state.banks.legalEntities[0]?.id || 0;
+
+  els.bankAccountEntitySelect.innerHTML = state.banks.legalEntities
+    .map((entity) => `<option value="${entity.id}">${escapeHtml(entity.name)}</option>`)
+    .join("");
+
+  if (!selected || els.bankAccountEntitySelect.options.length === 0) return;
+
+  const exists = [...els.bankAccountEntitySelect.options].some(
+    (option) => Number(option.value) === selected
+  );
+
+  if (exists) {
+    els.bankAccountEntitySelect.value = String(selected);
+  } else {
+    els.bankAccountEntitySelect.selectedIndex = 0;
+  }
 }
 
 function bindReconcileEvents() {
@@ -835,7 +1234,11 @@ function persistAndRerenderAfterArticleChange() {
 }
 
 function getNextArticleId() {
-  return state.articles.reduce((max, row) => Math.max(max, row.id), 0) + 1;
+  return getNextId(state.articles);
+}
+
+function getNextId(items) {
+  return items.reduce((max, row) => Math.max(max, Number(row.id) || 0), 0) + 1;
 }
 
 function resetReportFilters() {
@@ -978,6 +1381,115 @@ function saveArticles(articles) {
   }
 }
 
+function loadBanksState() {
+  const fallback = {
+    legalEntities: getDefaultLegalEntities(),
+    accounts: [],
+  };
+
+  try {
+    const raw = localStorage.getItem(STORAGE_BANKS_KEY);
+    if (!raw) return fallback;
+
+    const parsed = JSON.parse(raw);
+    return normalizeBanksState(parsed, fallback);
+  } catch (error) {
+    console.warn("Cannot load banks from localStorage", error);
+    return fallback;
+  }
+}
+
+function saveBanksState(banksState) {
+  try {
+    localStorage.setItem(STORAGE_BANKS_KEY, JSON.stringify(banksState));
+  } catch (error) {
+    console.warn("Cannot save banks to localStorage", error);
+  }
+}
+
+function normalizeBanksState(rawState, fallback) {
+  if (!rawState || typeof rawState !== "object") return fallback;
+
+  const legalEntities = Array.isArray(rawState.legalEntities)
+    ? rawState.legalEntities
+        .map((item, idx) => ({
+          id: Number(item?.id) || idx + 1,
+          name: String(item?.name || "").trim(),
+        }))
+        .filter((item) => item.name !== "")
+    : [];
+
+  const normalizedEntities = legalEntities.length > 0 ? legalEntities : fallback.legalEntities;
+  const ensuredEntities = [...normalizedEntities];
+  const usedIds = new Set(ensuredEntities.map((item) => item.id));
+  let nextId = 1;
+
+  while (ensuredEntities.length < 5) {
+    while (usedIds.has(nextId)) nextId += 1;
+    ensuredEntities.push({ id: nextId, name: `Юрлицо ${ensuredEntities.length + 1}` });
+    usedIds.add(nextId);
+  }
+
+  let accounts = Array.isArray(rawState.accounts)
+    ? rawState.accounts.map((account, idx) => normalizeBankAccount(account, idx))
+    : [];
+
+  const entityIds = new Set(ensuredEntities.map((entity) => entity.id));
+  const defaultEntityId = ensuredEntities[0]?.id || 1;
+  accounts = accounts.map((account) =>
+    entityIds.has(account.legalEntityId) ? account : { ...account, legalEntityId: defaultEntityId }
+  );
+
+  return {
+    legalEntities: ensuredEntities,
+    accounts,
+  };
+}
+
+function normalizeBankAccount(account, idx) {
+  const transactions = Array.isArray(account?.transactions)
+    ? account.transactions
+        .map((tx, txIdx) => ({
+          idx: Number(tx?.idx) || txIdx,
+          dateObj: parseFlexibleDate(tx?.dateObj || tx?.dateRaw || ""),
+          amount: Number(tx?.amount),
+          balance: Number.isFinite(Number(tx?.balance)) ? Number(tx.balance) : null,
+        }))
+        .filter((tx) => tx.dateObj && Number.isFinite(tx.amount))
+    : [];
+
+  const summary = account?.summary
+    ? {
+        monthStartDate: parseFlexibleDate(account.summary.monthStartDate || ""),
+        latestDate: parseFlexibleDate(account.summary.latestDate || ""),
+        openingBalance: toMaybeNumber(account.summary.openingBalance),
+        monthEndBalance: toMaybeNumber(account.summary.monthEndBalance),
+        latestBalance: toMaybeNumber(account.summary.latestBalance),
+        inflow: Number(account.summary.inflow) || 0,
+        outflow: Number(account.summary.outflow) || 0,
+      }
+    : null;
+
+  return {
+    id: Number(account?.id) || idx + 1,
+    legalEntityId: Number(account?.legalEntityId) || 0,
+    name: String(account?.name || "").trim(),
+    fileName: String(account?.fileName || ""),
+    transactions,
+    summary: summary && summary.latestDate ? summary : transactions.length > 0 ? summarizeBankTransactions(transactions) : null,
+  };
+}
+
+function getDefaultLegalEntities() {
+  return [
+    { id: 1, name: "Юрлицо 1" },
+    { id: 2, name: "Юрлицо 2" },
+    { id: 3, name: "Юрлицо 3" },
+    { id: 4, name: "Юрлицо 4" },
+    { id: 5, name: "Юрлицо 5" },
+  ];
+}
+
 function normalizeArticle(row, idx) {
   const aliases = Array.isArray(row.aliases)
     ? row.aliases.map((item) => String(item || "").trim()).filter(Boolean)
@@ -1115,11 +1627,20 @@ function parseAmount(raw) {
 
 function parseFlexibleDate(raw) {
   if (!raw) return null;
+  if (raw instanceof Date) {
+    return Number.isNaN(raw.getTime()) ? null : raw;
+  }
 
   const clean = String(raw).trim();
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
     const date = new Date(`${clean}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const isoWithTime = clean.match(/^(\d{4}-\d{2}-\d{2})T/);
+  if (isoWithTime) {
+    const date = new Date(`${isoWithTime[1]}T00:00:00`);
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
@@ -1181,8 +1702,22 @@ function formatMoney(value) {
   }).format(value || 0);
 }
 
+function formatMaybeMoney(value) {
+  return Number.isFinite(value) ? formatMoney(value) : "н/д";
+}
+
+function formatDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "н/д";
+  return toDateInputValue(date);
+}
+
 function formatNumberForCsv(value) {
   return Number(value || 0).toFixed(2).replace(".", ",");
+}
+
+function toMaybeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function normalizeText(value) {
