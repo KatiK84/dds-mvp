@@ -2364,7 +2364,7 @@ function detectBankHeaderIndexes(rows, candidates) {
 
     const headers = row.map((header) => normalizeText(header));
     const dateIdx = findColumn(headers, candidates.dateCandidates || []);
-    const amountIdx = findColumn(headers, candidates.amountCandidates || []);
+    const amountIdx = findAmountColumn(headers, candidates.amountCandidates || []);
     const debitIdx = findColumn(headers, candidates.debitCandidates || []);
     const creditIdx = findColumn(headers, candidates.creditCandidates || []);
     const balanceIdx = findColumn(headers, candidates.balanceCandidates || []);
@@ -2388,6 +2388,38 @@ function detectBankHeaderIndexes(rows, candidates) {
   }
 
   return result;
+}
+
+function findAmountColumn(headers, candidates) {
+  if (!Array.isArray(headers) || headers.length === 0) return -1;
+
+  const isAmountHeader = (header) => {
+    const normalized = normalizeText(header);
+    if (!normalized) return false;
+
+    if (normalized.includes("umsatzart")) return false;
+    if (normalized.includes("buchungstext")) return false;
+    if (normalized.includes("verwendungszweck")) return false;
+    if (normalized.includes("kategorie")) return false;
+
+    return (candidates || []).some((candidate) => {
+      const c = normalizeText(candidate);
+      if (!c) return false;
+
+      if (c === "umsatz") {
+        return normalized === "umsatz" || normalized.startsWith("umsatz ") || normalized.endsWith(" umsatz");
+      }
+
+      return normalized.includes(c);
+    });
+  };
+
+  const firstMatch = headers.findIndex((header) => isAmountHeader(header));
+  if (firstMatch !== -1) return firstMatch;
+
+  // Conservative fallback: most bank exports explicitly use "Betrag".
+  const betragIdx = headers.findIndex((header) => normalizeText(header).includes("betrag"));
+  return betragIdx;
 }
 
 function parseCsvWithBestDelimiter(text, profile) {
