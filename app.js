@@ -62,6 +62,12 @@ const STORAGE_ARTICLES_KEY = "dds_mvp_articles_v2";
 const STORAGE_BANKS_KEY = "dds_mvp_banks_v1";
 const UNKNOWN_ARTICLE = "Статья неизвестна";
 const UNKNOWN_ACTIVITY = "03 Финансовая деятельность";
+const BANK_PARSER_PROFILES = [
+  { value: "auto", label: "Автоопределение" },
+  { value: "deutsche", label: "Deutsche Bank" },
+  { value: "commerz", label: "Commerzbank" },
+  { value: "sparkasse", label: "Sparkasse" },
+];
 
 const state = {
   activeTab: "report",
@@ -177,6 +183,14 @@ function bindBankEvents() {
   els.bankAccountForm.addEventListener("submit", onAddBankAccount);
 
   els.banksEntityBlocks.addEventListener("change", (event) => {
+    const parserSelect = event.target.closest("select[data-bank-parser]");
+    if (parserSelect) {
+      const accountId = Number(parserSelect.dataset.accountId);
+      const parserProfile = String(parserSelect.value || "auto");
+      setBankParserProfile(accountId, parserProfile);
+      return;
+    }
+
     const input = event.target.closest("input[data-bank-upload='1']");
     if (!input) return;
 
@@ -186,6 +200,8 @@ function bindBankEvents() {
 
     const monthInput = els.banksEntityBlocks.querySelector(`input[data-bank-month='${accountId}']`);
     const selectedMonth = String(monthInput?.value || "").trim();
+    const parserInput = els.banksEntityBlocks.querySelector(`select[data-bank-parser][data-account-id='${accountId}']`);
+    const parserProfile = String(parserInput?.value || "auto");
 
     if (!selectedMonth) {
       alert("Выберите месяц, за который загружается выписка.");
@@ -193,7 +209,7 @@ function bindBankEvents() {
       return;
     }
 
-    uploadBankStatement(accountId, selectedMonth, file);
+    uploadBankStatement(accountId, selectedMonth, file, parserProfile);
   });
 
   els.banksEntityBlocks.addEventListener("click", (event) => {
@@ -210,6 +226,12 @@ function bindBankEvents() {
 
     if (action === "restore") {
       restoreBankAccount(accountId);
+      return;
+    }
+
+    if (action === "remove-month") {
+      const month = String(button.dataset.month || "").trim();
+      removeMonthlyStatement(accountId, month);
     }
   });
 }
@@ -252,6 +274,7 @@ function onAddBankAccount(event) {
     id: getNextId(state.banks.accounts),
     legalEntityId,
     name,
+    parserProfile: "auto",
     status: "ACTIVE",
     fileName: "",
     monthlyStatements: {},
@@ -263,12 +286,12 @@ function onAddBankAccount(event) {
   persistBanksAndRender();
 }
 
-function uploadBankStatement(accountId, selectedMonth, file) {
+function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "auto") {
   const reader = new FileReader();
 
   reader.onload = () => {
     try {
-      const transactions = parseBankStatementCsv(String(reader.result || ""));
+      const transactions = parseBankStatementCsv(String(reader.result || ""), parserProfile);
       const monthTransactions = transactions
         .filter((tx) => {
           const primaryMonth = toMonthKey(tx.dateObj);
@@ -316,6 +339,14 @@ function uploadBankStatement(accountId, selectedMonth, file) {
   reader.readAsText(file, "utf-8");
 }
 
+function setBankParserProfile(accountId, parserProfile) {
+  const normalizedProfile = BANK_PARSER_PROFILES.some((item) => item.value === parserProfile) ? parserProfile : "auto";
+  state.banks.accounts = state.banks.accounts.map((account) =>
+    account.id === accountId ? { ...account, parserProfile: normalizedProfile } : account
+  );
+  persistBanksAndRender();
+}
+
 function upsertMonthlyStatement(account, monthKey, payload) {
   const normalizedMonth = normalizeMonthKey(monthKey);
   if (!normalizedMonth) return account;
@@ -340,6 +371,54 @@ function upsertMonthlyStatement(account, monthKey, payload) {
     transactions: mergedTransactions,
     summary,
   };
+}
+
+function rebuildAccountFromMonthlyStatements(account, monthlyStatements) {
+  const mergedTransactions = Object.values(monthlyStatements).flatMap((statement) => statement.transactions || []);
+  const summary = summarizeBankTransactions(mergedTransactions);
+  const latestLoadedMonth = Object.keys(monthlyStatements).sort((a, b) => b.localeCompare(a))[0] || "";
+  const latestStatement = latestLoadedMonth ? monthlyStatements[latestLoadedMonth] : null;
+
+  return {
+    ...account,
+    monthlyStatements,
+    transactions: mergedTransactions,
+    summary,
+    fileName: String(latestStatement?.fileName || ""),
+  };
+}
+
+function removeMonthlyStatement(accountId, monthKey) {
+  const normalizedMonth = normalizeMonthKey(monthKey);
+  if (!normalizedMonth) return;
+
+  const account = state.banks.accounts.find((item) => item.id === accountId);
+  if (!account || account.status === "DELETED") return;
+  if (!account.monthlyStatements || !account.monthlyStatements[normalizedMonth]) return;
+
+  const firstConfirm = window.confirm(
+    `Удалить выписку за ${normalizedMonth} у счета "${account.name}"? Это действие удалит только этот месяц.`
+  );
+  if (!firstConfirm) return;
+
+  const phrase = window.prompt(`Для подтверждения введите: УДАЛИТЬ ${normalizedMonth}`);
+  if (phrase !== `УДАЛИТЬ ${normalizedMonth}`) {
+    alert("Удаление отменено: подтверждение не совпало.");
+    return;
+  }
+
+  const finalConfirm = window.confirm(`Точно удалить месяц ${normalizedMonth}? Это действие нельзя отменить автоматически.`);
+  if (!finalConfirm) return;
+
+  state.banks.accounts = state.banks.accounts.map((item) => {
+    if (item.id !== accountId) return item;
+
+    const nextStatements = { ...(item.monthlyStatements || {}) };
+    delete nextStatements[normalizedMonth];
+    return rebuildAccountFromMonthlyStatements(item, nextStatements);
+  });
+
+  persistBanksAndRender();
 }
 
 function deleteBankAccountSafely(accountId) {
@@ -381,7 +460,60 @@ function restoreBankAccount(accountId) {
   persistBanksAndRender();
 }
 
-function parseBankStatementCsv(text) {
+function getBankStatementProfile(profileRaw) {
+  const profile = String(profileRaw || "auto").toLowerCase();
+  const base = {
+    dateCandidates: [
+      "дата",
+      "date",
+      "booking",
+      "buchungstag",
+      "buchungsdatum",
+      "buchung",
+      "wertstellung",
+      "wert",
+      "valuta",
+      "valutadatum",
+    ],
+    altDateCandidates: ["wert", "wertstellung", "valuta", "valutadatum"],
+    amountCandidates: ["сумма", "amount", "betrag", "umsatz", "umsatz (eur)", "betrag (eur)"],
+    debitCandidates: ["списан", "debit", "расход", "выбыт", "soll", "lastschrift"],
+    creditCandidates: ["зачисл", "credit", "приход", "поступ", "haben", "gutschrift"],
+    balanceCandidates: ["баланс", "остаток", "balance", "saldo", "kontostand", "kontostand alt", "kontostand neu"],
+  };
+
+  if (profile === "deutsche") {
+    return {
+      ...base,
+      dateCandidates: ["buchungstag", "wertstellung", "wert", "date", ...base.dateCandidates],
+      amountCandidates: ["betrag", "umsatz", ...base.amountCandidates],
+      balanceCandidates: ["kontostand", "saldo", ...base.balanceCandidates],
+    };
+  }
+
+  if (profile === "commerz") {
+    return {
+      ...base,
+      dateCandidates: ["buchungstag", "valuta", "buchungsdatum", ...base.dateCandidates],
+      amountCandidates: ["umsatz", "betrag", ...base.amountCandidates],
+      debitCandidates: ["soll", "debit", ...base.debitCandidates],
+      creditCandidates: ["haben", "credit", ...base.creditCandidates],
+    };
+  }
+
+  if (profile === "sparkasse") {
+    return {
+      ...base,
+      dateCandidates: ["buchungstag", "wertstellung", "valuta", ...base.dateCandidates],
+      amountCandidates: ["umsatz", "betrag", ...base.amountCandidates],
+      balanceCandidates: ["saldo", "kontostand", ...base.balanceCandidates],
+    };
+  }
+
+  return base;
+}
+
+function parseBankStatementCsv(text, parserProfile = "auto") {
   const cleanText = text.replace(/^\uFEFF/, "").trim();
   if (!cleanText) throw new Error("CSV выписки пустой.");
 
@@ -391,20 +523,13 @@ function parseBankStatementCsv(text) {
 
   if (rows.length < 2) throw new Error("В выписке нет данных.");
 
-  const dateCandidates = [
-    "дата",
-    "date",
-    "booking",
-    "buchungstag",
-    "buchungsdatum",
-    "wertstellung",
-    "valuta",
-  ];
-  const altDateCandidates = ["wert", "wertstellung", "valuta"];
-  const amountCandidates = ["сумма", "amount", "betrag", "umsatz", "betrag (eur)"];
-  const debitCandidates = ["списан", "debit", "расход", "выбыт", "soll", "lastschrift"];
-  const creditCandidates = ["зачисл", "credit", "приход", "поступ", "haben", "gutschrift"];
-  const balanceCandidates = ["баланс", "остаток", "balance", "saldo", "kontostand"];
+  const profile = getBankStatementProfile(parserProfile);
+  const dateCandidates = profile.dateCandidates;
+  const altDateCandidates = profile.altDateCandidates;
+  const amountCandidates = profile.amountCandidates;
+  const debitCandidates = profile.debitCandidates;
+  const creditCandidates = profile.creditCandidates;
+  const balanceCandidates = profile.balanceCandidates;
 
   let headerRowIndex = -1;
   let idxDate = -1;
@@ -582,6 +707,28 @@ function renderBanksEntityBlocks(entitySummaries) {
                 const isDeleted = account.status === "DELETED";
                 const loadedMonths = getLoadedStatementMonths(account);
                 const defaultUploadMonth = loadedMonths[0] || getCurrentMonthKey();
+                const parserProfile = BANK_PARSER_PROFILES.some((item) => item.value === account.parserProfile)
+                  ? account.parserProfile
+                  : "auto";
+                const parserOptions = BANK_PARSER_PROFILES.map(
+                  (item) =>
+                    `<option value="${item.value}" ${item.value === parserProfile ? "selected" : ""}>${item.label}</option>`
+                ).join("");
+                const loadedMonthsHtml =
+                  loadedMonths.length === 0
+                    ? `<span class="month-pill empty">нет</span>`
+                    : loadedMonths
+                        .map(
+                          (month) => `<span class="month-pill">
+                            ${month}
+                            ${
+                              isDeleted
+                                ? ""
+                                : `<button type="button" class="inline-link danger" data-bank-action="remove-month" data-account-id="${account.id}" data-month="${month}">Удалить</button>`
+                            }
+                          </span>`
+                        )
+                        .join("");
                 const status = account.summary
                   ? `Файл: ${escapeHtml(account.fileName)}. Последняя дата: ${formatDate(account.summary.latestDate)}`
                   : "Выписка не загружена.";
@@ -608,11 +755,14 @@ function renderBanksEntityBlocks(entitySummaries) {
                       value="${defaultUploadMonth}"
                       ${isDeleted ? "disabled" : ""}
                     />
+                    <select data-bank-parser data-account-id="${account.id}" ${isDeleted ? "disabled" : ""}>
+                      ${parserOptions}
+                    </select>
                     <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" ${isDeleted ? "disabled" : ""} />
                     <span class="bank-status">${status}</span>
                   </div>
                   <div class="bank-status">
-                    Загруженные месяцы: ${loadedMonths.length > 0 ? loadedMonths.join(", ") : "нет"}
+                    Загруженные месяцы: <span class="months-inline">${loadedMonthsHtml}</span>
                   </div>
                   ${renderBankAccountSummary(account.summary, account.transactions)}
                 </article>`;
@@ -1816,6 +1966,7 @@ function normalizeBankAccount(account, idx) {
         .map((tx, txIdx) => ({
           idx: Number(tx?.idx) || txIdx,
           dateObj: parseFlexibleDate(tx?.dateObj || tx?.dateRaw || ""),
+          altDateObj: parseFlexibleDate(tx?.altDateObj || ""),
           amount: Number(tx?.amount),
           balance: Number.isFinite(Number(tx?.balance)) ? Number(tx.balance) : null,
         }))
@@ -1834,6 +1985,7 @@ function normalizeBankAccount(account, idx) {
             .map((tx, txIdx) => ({
               idx: Number(tx?.idx) || txIdx,
               dateObj: parseFlexibleDate(tx?.dateObj || tx?.dateRaw || ""),
+              altDateObj: parseFlexibleDate(tx?.altDateObj || ""),
               amount: Number(tx?.amount),
               balance: Number.isFinite(Number(tx?.balance)) ? Number(tx.balance) : null,
             }))
@@ -1887,6 +2039,9 @@ function normalizeBankAccount(account, idx) {
     id: Number(account?.id) || idx + 1,
     legalEntityId: Number(account?.legalEntityId) || 0,
     name: String(account?.name || "").trim(),
+    parserProfile: BANK_PARSER_PROFILES.some((item) => item.value === account?.parserProfile)
+      ? account.parserProfile
+      : "auto",
     status: account?.status === "DELETED" ? "DELETED" : "ACTIVE",
     fileName: String(account?.fileName || ""),
     monthlyStatements,
@@ -2013,7 +2168,15 @@ function findColumn(headers, candidates) {
 }
 
 function parseAmount(raw) {
-  let cleaned = String(raw || "").trim().replace(/\s/g, "").replace(/[^\d,.-]/g, "");
+  const source = String(raw || "").trim();
+  if (!source) return null;
+
+  const digitsOnlyRaw = source.replace(/\D/g, "");
+  const hasSeparators = /[,.]/.test(source);
+  if (digitsOnlyRaw.length > 18) return null;
+  if (!hasSeparators && digitsOnlyRaw.length > 12) return null;
+
+  let cleaned = source.replace(/\s/g, "").replace(/[^\d,.-]/g, "");
   if (!cleaned) return null;
 
   // Supports trailing minus: "1.234,56-"
@@ -2163,9 +2326,11 @@ function extractAmountFromCells(cells) {
   for (const cell of cells) {
     const raw = String(cell || "").trim();
     if (!raw) continue;
+    if (!/[.,€]/.test(raw)) continue;
 
     const amount = parseAmount(raw);
     if (amount === null || !Number.isFinite(amount)) continue;
+    if (Math.abs(amount) > 1000000000) continue;
 
     // Keep the amount with highest absolute value, usually this is the balance.
     if (candidate === null || Math.abs(amount) > Math.abs(candidate)) {

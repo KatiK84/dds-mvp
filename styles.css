@@ -350,9 +350,50 @@ tr.unresolved-row {
   max-width: 320px;
 }
 
+.bank-upload select {
+  min-width: 180px;
+}
+
 .bank-status {
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.months-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.month-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #eef4ee;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.month-pill.empty {
+  background: #f7f8f7;
+}
+
+.inline-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: #24674c;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.inline-link:hover {
+  text-decoration: underline;
+}
+
+.inline-link.danger {
+  color: #b44949;
 }
 
 .bank-account-summary {
