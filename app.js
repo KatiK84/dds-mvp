@@ -191,6 +191,19 @@ function bindBankEvents() {
       return;
     }
 
+    const manualOpeningMonthInput = event.target.closest("input[data-bank-opening-month]");
+    if (manualOpeningMonthInput) {
+      const accountId = Number(manualOpeningMonthInput.dataset.accountId);
+      const selectedMonth = normalizeMonthKey(manualOpeningMonthInput.value);
+      const account = state.banks.accounts.find((item) => item.id === accountId);
+      if (!account) return;
+      const amountInput = els.banksEntityBlocks.querySelector(`input[data-bank-opening-amount][data-account-id='${accountId}']`);
+      if (!amountInput) return;
+      const existing = getManualOpeningBalance(account, selectedMonth);
+      amountInput.value = Number.isFinite(existing) ? formatNumberForInput(existing) : "";
+      return;
+    }
+
     const input = event.target.closest("input[data-bank-upload='1']");
     if (!input) return;
 
@@ -232,6 +245,22 @@ function bindBankEvents() {
     if (action === "remove-month") {
       const month = String(button.dataset.month || "").trim();
       removeMonthlyStatement(accountId, month);
+      return;
+    }
+
+    if (action === "save-opening") {
+      const monthInput = els.banksEntityBlocks.querySelector(`input[data-bank-opening-month][data-account-id='${accountId}']`);
+      const amountInput = els.banksEntityBlocks.querySelector(`input[data-bank-opening-amount][data-account-id='${accountId}']`);
+      const month = String(monthInput?.value || "").trim();
+      const amount = String(amountInput?.value || "").trim();
+      setManualOpeningBalance(accountId, month, amount);
+      return;
+    }
+
+    if (action === "clear-opening") {
+      const monthInput = els.banksEntityBlocks.querySelector(`input[data-bank-opening-month][data-account-id='${accountId}']`);
+      const month = String(monthInput?.value || "").trim();
+      clearManualOpeningBalance(accountId, month);
     }
   });
 }
@@ -277,6 +306,7 @@ function onAddBankAccount(event) {
     parserProfile: "auto",
     status: "ACTIVE",
     fileName: "",
+    manualOpeningBalances: {},
     monthlyStatements: {},
     transactions: [],
     summary: null,
@@ -287,6 +317,14 @@ function onAddBankAccount(event) {
 }
 
 function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "auto") {
+  const fileName = String(file?.name || "");
+  const lowerName = fileName.toLowerCase();
+  const looksLikeCsv = lowerName.endsWith(".csv");
+  if (!looksLikeCsv) {
+    alert("Загрузите CSV-файл выписки. Формат .numbers не поддерживается для импорта.");
+    return;
+  }
+
   const reader = new FileReader();
 
   reader.onload = () => {
@@ -321,7 +359,7 @@ function uploadBankStatement(accountId, selectedMonth, file, parserProfile = "au
       const balanceCount = monthTransactions.filter((tx) => Number.isFinite(tx.balance)).length;
       if (movementCount === 0 && balanceCount === 0) {
         alert(
-          "Не удалось распознать суммы и остатки в выписке. Попробуйте выбрать другой профиль банка или другой CSV-экспорт."
+          "Не удалось распознать суммы и остатки в выписке. Проверьте, что это именно CSV-экспорт (не .numbers), и попробуйте другой профиль банка."
         );
         return;
       }
@@ -356,6 +394,57 @@ function setBankParserProfile(accountId, parserProfile) {
   persistBanksAndRender();
 }
 
+function setManualOpeningBalance(accountId, monthKey, amountRaw) {
+  const normalizedMonth = normalizeMonthKey(monthKey);
+  if (!normalizedMonth) {
+    alert("Выберите месяц для ручного остатка.");
+    return;
+  }
+
+  const amount = parseAmount(amountRaw);
+  if (!Number.isFinite(amount)) {
+    alert("Введите корректную сумму остатка (например: 12000,50).");
+    return;
+  }
+
+  state.banks.accounts = state.banks.accounts.map((account) => {
+    if (account.id !== accountId) return account;
+    const manualOpeningBalances = {
+      ...(account.manualOpeningBalances || {}),
+      [normalizedMonth]: amount,
+    };
+
+    return rebuildAccountFromMonthlyStatements({
+      ...account,
+      manualOpeningBalances,
+    }, account.monthlyStatements || {});
+  });
+
+  persistBanksAndRender();
+}
+
+function clearManualOpeningBalance(accountId, monthKey) {
+  const normalizedMonth = normalizeMonthKey(monthKey);
+  if (!normalizedMonth) {
+    alert("Выберите месяц для очистки ручного остатка.");
+    return;
+  }
+
+  state.banks.accounts = state.banks.accounts.map((account) => {
+    if (account.id !== accountId) return account;
+    const manualOpeningBalances = { ...(account.manualOpeningBalances || {}) };
+    if (!(normalizedMonth in manualOpeningBalances)) return account;
+    delete manualOpeningBalances[normalizedMonth];
+
+    return rebuildAccountFromMonthlyStatements({
+      ...account,
+      manualOpeningBalances,
+    }, account.monthlyStatements || {});
+  });
+
+  persistBanksAndRender();
+}
+
 function upsertMonthlyStatement(account, monthKey, payload) {
   const normalizedMonth = normalizeMonthKey(monthKey);
   if (!normalizedMonth) return account;
@@ -371,7 +460,7 @@ function upsertMonthlyStatement(account, monthKey, payload) {
   };
 
   const mergedTransactions = Object.values(monthlyStatements).flatMap((statement) => statement.transactions || []);
-  const summary = summarizeBankTransactions(mergedTransactions);
+  const summary = summarizeBankTransactions(mergedTransactions, account.manualOpeningBalances || {});
 
   return {
     ...account,
@@ -384,7 +473,7 @@ function upsertMonthlyStatement(account, monthKey, payload) {
 
 function rebuildAccountFromMonthlyStatements(account, monthlyStatements) {
   const mergedTransactions = Object.values(monthlyStatements).flatMap((statement) => statement.transactions || []);
-  const summary = summarizeBankTransactions(mergedTransactions);
+  const summary = summarizeBankTransactions(mergedTransactions, account.manualOpeningBalances || {});
   const latestLoadedMonth = Object.keys(monthlyStatements).sort((a, b) => b.localeCompare(a))[0] || "";
   const latestStatement = latestLoadedMonth ? monthlyStatements[latestLoadedMonth] : null;
 
@@ -644,7 +733,7 @@ function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
   return parsedRows;
 }
 
-function summarizeBankTransactions(transactions) {
+function summarizeBankTransactions(transactions, manualOpeningBalances = {}) {
   if (!transactions || transactions.length === 0) {
     return null;
   }
@@ -657,7 +746,7 @@ function summarizeBankTransactions(transactions) {
   const latest = sorted[sorted.length - 1];
   const latestMonthKey = toMonthKey(latest.dateObj);
   const monthStart = parseFlexibleDate(`${latestMonthKey}-01`) || new Date(latest.dateObj.getFullYear(), latest.dateObj.getMonth(), 1);
-  const monthlyRows = summarizeBankTransactionsByMonth(sorted);
+  const monthlyRows = summarizeBankTransactionsByMonth(sorted, manualOpeningBalances || {});
   const latestMonthRow = monthlyRows.find((row) => row.month === latestMonthKey) || null;
   const latestOverallWithBalance = [...sorted].reverse().find((tx) => tx.balance !== null) || null;
   const openingBalance = latestMonthRow ? latestMonthRow.openingBalance : null;
@@ -710,6 +799,8 @@ function renderBanksEntityBlocks(entitySummaries) {
                 const parserProfile = BANK_PARSER_PROFILES.some((item) => item.value === account.parserProfile)
                   ? account.parserProfile
                   : "auto";
+                const defaultManualOpeningMonth = getDefaultManualOpeningMonth(account);
+                const manualOpeningValue = getManualOpeningBalance(account, defaultManualOpeningMonth);
                 const parserOptions = BANK_PARSER_PROFILES.map(
                   (item) =>
                     `<option value="${item.value}" ${item.value === parserProfile ? "selected" : ""}>${item.label}</option>`
@@ -761,10 +852,38 @@ function renderBanksEntityBlocks(entitySummaries) {
                     <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" ${isDeleted ? "disabled" : ""} />
                     <span class="bank-status">${status}</span>
                   </div>
+                  <div class="bank-manual-opening">
+                    <span class="bank-status">Ручной остаток на начало месяца</span>
+                    <input
+                      type="month"
+                      data-bank-opening-month
+                      data-account-id="${account.id}"
+                      value="${defaultManualOpeningMonth}"
+                      ${isDeleted ? "disabled" : ""}
+                    />
+                    <input
+                      type="text"
+                      data-bank-opening-amount
+                      data-account-id="${account.id}"
+                      placeholder="например 12500,00"
+                      value="${Number.isFinite(manualOpeningValue) ? formatNumberForInput(manualOpeningValue) : ""}"
+                      ${isDeleted ? "disabled" : ""}
+                    />
+                    <button type="button" class="secondary" data-bank-action="save-opening" data-account-id="${account.id}" ${
+                      isDeleted ? "disabled" : ""
+                    }>
+                      Сохранить
+                    </button>
+                    <button type="button" class="secondary" data-bank-action="clear-opening" data-account-id="${account.id}" ${
+                      isDeleted ? "disabled" : ""
+                    }>
+                      Очистить
+                    </button>
+                  </div>
                   <div class="bank-status">
                     Загруженные месяцы: <span class="months-inline">${loadedMonthsHtml}</span>
                   </div>
-                  ${renderBankAccountSummary(account.summary, account.transactions)}
+                  ${renderBankAccountSummary(account.summary, account.transactions, account.manualOpeningBalances)}
                 </article>`;
               })
               .join("");
@@ -779,12 +898,12 @@ function renderBanksEntityBlocks(entitySummaries) {
     .join("");
 }
 
-function renderBankAccountSummary(summary, transactions) {
+function renderBankAccountSummary(summary, transactions, manualOpeningBalances = {}) {
   if (!summary) {
     return `<div class="bank-account-summary empty">Нет данных по банку.</div>`;
   }
 
-  const monthlyRows = summarizeBankTransactionsByMonth(transactions || []);
+  const monthlyRows = summarizeBankTransactionsByMonth(transactions || [], manualOpeningBalances || {});
   const monthlyTableHtml = renderBankAccountMonthlyTable(monthlyRows);
 
   return `
@@ -800,7 +919,7 @@ function renderBankAccountSummary(summary, transactions) {
   `;
 }
 
-function summarizeBankTransactionsByMonth(transactions) {
+function summarizeBankTransactionsByMonth(transactions, manualOpeningBalances = {}) {
   if (!transactions || transactions.length === 0) return [];
 
   const sorted = [...transactions].sort((a, b) => {
@@ -862,7 +981,11 @@ function summarizeBankTransactionsByMonth(transactions) {
     const current = baseRows[i];
     const prev = i > 0 ? baseRows[i - 1] : null;
 
-    if (prev && Number.isFinite(prev.endBalance)) {
+    const manualOpening = toMaybeNumber(manualOpeningBalances[current.month]);
+
+    if (Number.isFinite(manualOpening)) {
+      current.openingBalance = manualOpening;
+    } else if (prev && Number.isFinite(prev.endBalance)) {
       current.openingBalance = prev.endBalance;
     }
 
@@ -2022,6 +2145,17 @@ function normalizeBankAccount(account, idx) {
   }
 
   const transactions = Object.values(monthlyStatements).flatMap((statement) => statement.transactions || []);
+  const manualOpeningBalances =
+    account?.manualOpeningBalances && typeof account.manualOpeningBalances === "object"
+      ? Object.entries(account.manualOpeningBalances).reduce((acc, [rawMonth, rawValue]) => {
+          const month = normalizeMonthKey(rawMonth);
+          const amount = toMaybeNumber(rawValue);
+          if (month && Number.isFinite(amount)) {
+            acc[month] = amount;
+          }
+          return acc;
+        }, {})
+      : {};
 
   const summary = account?.summary
     ? {
@@ -2044,9 +2178,15 @@ function normalizeBankAccount(account, idx) {
       : "auto",
     status: account?.status === "DELETED" ? "DELETED" : "ACTIVE",
     fileName: String(account?.fileName || ""),
+    manualOpeningBalances,
     monthlyStatements,
     transactions,
-    summary: summary && summary.latestDate ? summary : transactions.length > 0 ? summarizeBankTransactions(transactions) : null,
+    summary:
+      transactions.length > 0
+        ? summarizeBankTransactions(transactions, manualOpeningBalances)
+        : summary && summary.latestDate
+          ? summary
+          : null,
   };
 }
 
@@ -2545,6 +2685,24 @@ function getLoadedStatementMonths(account) {
   return Object.keys(account?.monthlyStatements || {}).sort((a, b) => b.localeCompare(a));
 }
 
+function getDefaultManualOpeningMonth(account) {
+  const loaded = getLoadedStatementMonths(account);
+  if (loaded.length > 0) {
+    const earliest = [...loaded].sort((a, b) => a.localeCompare(b))[0];
+    const year = String(earliest).slice(0, 4);
+    return /^\d{4}$/.test(year) ? `${year}-01` : earliest;
+  }
+
+  const currentYear = String(new Date().getFullYear());
+  return `${currentYear}-01`;
+}
+
+function getManualOpeningBalance(account, monthKey) {
+  const normalizedMonth = normalizeMonthKey(monthKey);
+  if (!normalizedMonth) return null;
+  return toMaybeNumber(account?.manualOpeningBalances?.[normalizedMonth]);
+}
+
 function toDateInputValue(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
     date.getDate()
@@ -2571,6 +2729,11 @@ function formatDate(date) {
 
 function formatNumberForCsv(value) {
   return Number(value || 0).toFixed(2).replace(".", ",");
+}
+
+function formatNumberForInput(value) {
+  if (!Number.isFinite(value)) return "";
+  return String(value.toFixed(2)).replace(".", ",");
 }
 
 function toMaybeNumber(value) {

@@ -354,6 +354,22 @@ tr.unresolved-row {
   min-width: 180px;
 }
 
+.bank-manual-opening {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.bank-manual-opening input[type="month"] {
+  min-width: 140px;
+}
+
+.bank-manual-opening input[type="text"] {
+  min-width: 180px;
+}
+
 .bank-status {
   color: var(--muted);
   font-size: 0.84rem;
