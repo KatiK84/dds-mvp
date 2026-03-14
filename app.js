@@ -269,7 +269,25 @@ function uploadBankStatement(accountId, selectedMonth, file) {
   reader.onload = () => {
     try {
       const transactions = parseBankStatementCsv(String(reader.result || ""));
-      const monthTransactions = transactions.filter((tx) => toMonthKey(tx.dateObj) === selectedMonth);
+      const monthTransactions = transactions
+        .filter((tx) => {
+          const primaryMonth = toMonthKey(tx.dateObj);
+          const altMonth = toMonthKey(tx.altDateObj);
+          return primaryMonth === selectedMonth || altMonth === selectedMonth;
+        })
+        .map((tx) => {
+          const primaryMonth = toMonthKey(tx.dateObj);
+          const altMonth = toMonthKey(tx.altDateObj);
+
+          if (primaryMonth !== selectedMonth && altMonth === selectedMonth && tx.altDateObj) {
+            return {
+              ...tx,
+              dateObj: tx.altDateObj,
+            };
+          }
+
+          return tx;
+        });
 
       if (monthTransactions.length === 0) {
         alert(`В файле нет операций за месяц ${selectedMonth}. Проверьте выбранный месяц.`);
@@ -437,11 +455,10 @@ function parseBankStatementCsv(text) {
 
       const primaryDateRaw = String(cells[idxDate] || "").trim();
       const altDateRaw = idxAltDate >= 0 ? String(cells[idxAltDate] || "").trim() : "";
+      const primaryDateObj = parseFlexibleDate(primaryDateRaw);
+      const altDateObj = altDateRaw ? parseFlexibleDate(altDateRaw) : null;
 
-      let dateObj = parseFlexibleDate(primaryDateRaw);
-      if (!dateObj && altDateRaw) {
-        dateObj = parseFlexibleDate(altDateRaw);
-      }
+      let dateObj = primaryDateObj || altDateObj;
       if (!dateObj) {
         dateObj = findDateInCells(cells);
       }
@@ -455,10 +472,16 @@ function parseBankStatementCsv(text) {
           amount = parseAmount(String(cells[idxAmount] || ""));
         }
 
+        const debitRaw = idxDebit >= 0 ? String(cells[idxDebit] || "") : "";
+        const creditRaw = idxCredit >= 0 ? String(cells[idxCredit] || "") : "";
+
         if (amount === null && (idxDebit >= 0 || idxCredit >= 0)) {
-          const debit = parseAmount(String(cells[idxDebit] || "")) || 0;
-          const credit = parseAmount(String(cells[idxCredit] || "")) || 0;
-          amount = credit - Math.abs(debit);
+          amount = resolveSignedAmountFromDebitCreditCells(debitRaw, creditRaw);
+        } else if (Number.isFinite(amount) && (idxDebit >= 0 || idxCredit >= 0)) {
+          const signHint = resolveSignHintFromDebitCreditCells(debitRaw, creditRaw);
+          if (signHint !== 0) {
+            amount = Math.abs(amount) * signHint;
+          }
         }
 
         if (amount === null || !Number.isFinite(amount)) {
@@ -478,6 +501,7 @@ function parseBankStatementCsv(text) {
       return {
         idx: index + headerRowIndex + 1,
         dateObj,
+        altDateObj,
         amount,
         balance: Number.isFinite(balance) ? balance : null,
       };
@@ -2010,6 +2034,62 @@ function parseAmount(raw) {
 
   const value = Number(cleaned);
   return Number.isFinite(value) ? value : null;
+}
+
+function resolveSignHintFromDebitCreditCells(debitRaw, creditRaw) {
+  const debitNormalized = normalizeText(debitRaw);
+  const creditNormalized = normalizeText(creditRaw);
+
+  const debitNumeric = parseAmount(debitRaw);
+  const creditNumeric = parseAmount(creditRaw);
+
+  if (Number.isFinite(debitNumeric) && Math.abs(debitNumeric) > 0.000001) return -1;
+  if (Number.isFinite(creditNumeric) && Math.abs(creditNumeric) > 0.000001) return 1;
+
+  if (debitNormalized && !creditNormalized) return -1;
+  if (creditNormalized && !debitNormalized) return 1;
+
+  if (isDebitMarker(debitNormalized)) return -1;
+  if (isCreditMarker(debitNormalized)) return 1;
+  if (isCreditMarker(creditNormalized)) return 1;
+  if (isDebitMarker(creditNormalized)) return -1;
+
+  return 0;
+}
+
+function resolveSignedAmountFromDebitCreditCells(debitRaw, creditRaw) {
+  const debitNumeric = parseAmount(debitRaw);
+  const creditNumeric = parseAmount(creditRaw);
+
+  if (Number.isFinite(debitNumeric) || Number.isFinite(creditNumeric)) {
+    return (creditNumeric || 0) - Math.abs(debitNumeric || 0);
+  }
+
+  return null;
+}
+
+function isDebitMarker(value) {
+  if (!value) return false;
+  return (
+    value === "s" ||
+    value === "d" ||
+    value === "-" ||
+    value.includes("soll") ||
+    value.includes("debit") ||
+    value.includes("lastschrift")
+  );
+}
+
+function isCreditMarker(value) {
+  if (!value) return false;
+  return (
+    value === "h" ||
+    value === "c" ||
+    value === "+" ||
+    value.includes("haben") ||
+    value.includes("credit") ||
+    value.includes("gutschrift")
+  );
 }
 
 function parseFlexibleDate(raw) {
