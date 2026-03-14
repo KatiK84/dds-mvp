@@ -54,55 +54,722 @@ const SAMPLE_OPERATIONS = `Дата;Статья ДДС;Сумма;Группа;
 2026-01-20;04 фонд Рекламы;-800;Выбытие;Маркетинг
 2026-02-02;02 фонд MGH;9500;Поступление;Продажи MGH
 2026-02-12;06 ФОТ (оклад);-4300;Выбытие;Зарплата
-2026-02-17;05 фонд Оборудование;-1300;Выбытие;Планшеты
+2026-02-17;05 фонд Оборудование;-1300;Выбытие;Покупка оборудования
 2026-03-04;08 фонд Кредитов (поступление);25000;Поступление;Получен кредит
-2026-03-18;08 фонд Кредитов (выбытие);-5000;Выбытие;Погашение кредита`; 
+2026-03-18;08 фонд Кредитов (выбытие);-5000;Выбытие;Погашение кредита`;
 
-const articleRows = parseArticleRows(RAW_ARTICLES);
-const activeArticleRows = articleRows.filter((row) => row.status !== "DELETE");
-const articleByName = buildArticleMap(activeArticleRows);
+const STORAGE_ARTICLES_KEY = "dds_mvp_articles_v2";
 
 const state = {
-  operations: [],
+  activeTab: "report",
+  articles: loadArticles(),
+  operationsRaw: [],
   filteredOperations: [],
   reportRows: [],
   monthRows: [],
 };
 
-const operationsFile = document.getElementById("operationsFile");
-const loadSampleBtn = document.getElementById("loadSampleBtn");
-const downloadTemplateBtn = document.getElementById("downloadTemplateBtn");
-const fileStatus = document.getElementById("fileStatus");
-const dateFromInput = document.getElementById("dateFrom");
-const dateToInput = document.getElementById("dateTo");
-const activityFilter = document.getElementById("activityFilter");
-const resetFiltersBtn = document.getElementById("resetFilters");
-const downloadReportCsvBtn = document.getElementById("downloadReportCsv");
-const reportMetrics = document.getElementById("reportMetrics");
-const reportTableBody = document.getElementById("reportTableBody");
-const monthTableBody = document.getElementById("monthTableBody");
-const dictionarySearch = document.getElementById("dictionarySearch");
-const dictionaryBody = document.getElementById("dictionaryBody");
+const els = {
+  tabs: document.querySelectorAll(".tab-btn"),
+  reportTab: document.getElementById("reportTab"),
+  articlesTab: document.getElementById("articlesTab"),
+  operationsFile: document.getElementById("operationsFile"),
+  loadSampleBtn: document.getElementById("loadSampleBtn"),
+  downloadTemplateBtn: document.getElementById("downloadTemplateBtn"),
+  fileStatus: document.getElementById("fileStatus"),
+  dateFromInput: document.getElementById("dateFrom"),
+  dateToInput: document.getElementById("dateTo"),
+  activityFilter: document.getElementById("activityFilter"),
+  resetFiltersBtn: document.getElementById("resetFilters"),
+  downloadReportCsvBtn: document.getElementById("downloadReportCsv"),
+  reportMetrics: document.getElementById("reportMetrics"),
+  reportTableBody: document.getElementById("reportTableBody"),
+  monthTableBody: document.getElementById("monthTableBody"),
+  articleSearch: document.getElementById("articleSearch"),
+  articleGroupFilter: document.getElementById("articleGroupFilter"),
+  articleActivityFilter: document.getElementById("articleActivityFilter"),
+  articleStatusFilter: document.getElementById("articleStatusFilter"),
+  addArticleBtn: document.getElementById("addArticleBtn"),
+  downloadArticlesCsv: document.getElementById("downloadArticlesCsv"),
+  articlesTableBody: document.getElementById("articlesTableBody"),
+  articleForm: document.getElementById("articleForm"),
+  articleId: document.getElementById("articleId"),
+  articleNoInput: document.getElementById("articleNoInput"),
+  articleNameInput: document.getElementById("articleNameInput"),
+  articleGroupInput: document.getElementById("articleGroupInput"),
+  articleActivityInput: document.getElementById("articleActivityInput"),
+  articleSourceInput: document.getElementById("articleSourceInput"),
+  articleStatusInput: document.getElementById("articleStatusInput"),
+  articleDescriptionInput: document.getElementById("articleDescriptionInput"),
+  articleCommentInput: document.getElementById("articleCommentInput"),
+  cancelArticleEdit: document.getElementById("cancelArticleEdit"),
+};
 
 init();
 
 function init() {
-  fillActivityFilter();
-  renderDictionary();
+  bindTabs();
+  bindReportEvents();
+  bindArticleEvents();
+  refreshArticleFilterOptions();
+  refreshReportActivityOptions();
+  renderArticlesTable();
   renderReport();
-
-  operationsFile.addEventListener("change", onFileUploaded);
-  loadSampleBtn.addEventListener("click", () => loadOperationsFromText(SAMPLE_OPERATIONS, "пример"));
-  downloadTemplateBtn.addEventListener("click", downloadTemplateCsv);
-  dateFromInput.addEventListener("change", renderReport);
-  dateToInput.addEventListener("change", renderReport);
-  activityFilter.addEventListener("change", renderReport);
-  resetFiltersBtn.addEventListener("click", resetFilters);
-  downloadReportCsvBtn.addEventListener("click", downloadReportCsv);
-  dictionarySearch.addEventListener("input", renderDictionary);
 }
 
-function parseArticleRows(raw) {
+function bindTabs() {
+  els.tabs.forEach((tabBtn) => {
+    tabBtn.addEventListener("click", () => setActiveTab(tabBtn.dataset.tab));
+  });
+}
+
+function setActiveTab(tabName) {
+  state.activeTab = tabName;
+
+  els.tabs.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tabName);
+  });
+
+  els.reportTab.classList.toggle("active", tabName === "report");
+  els.articlesTab.classList.toggle("active", tabName === "articles");
+}
+
+function bindReportEvents() {
+  els.operationsFile.addEventListener("change", onFileUploaded);
+  els.loadSampleBtn.addEventListener("click", () => loadOperationsFromText(SAMPLE_OPERATIONS, "пример"));
+  els.downloadTemplateBtn.addEventListener("click", downloadTemplateCsv);
+  els.dateFromInput.addEventListener("change", renderReport);
+  els.dateToInput.addEventListener("change", renderReport);
+  els.activityFilter.addEventListener("change", renderReport);
+  els.resetFiltersBtn.addEventListener("click", resetReportFilters);
+  els.downloadReportCsvBtn.addEventListener("click", downloadReportCsv);
+}
+
+function bindArticleEvents() {
+  els.articleSearch.addEventListener("input", renderArticlesTable);
+  els.articleGroupFilter.addEventListener("change", renderArticlesTable);
+  els.articleActivityFilter.addEventListener("change", renderArticlesTable);
+  els.articleStatusFilter.addEventListener("change", renderArticlesTable);
+  els.addArticleBtn.addEventListener("click", () => openArticleForm());
+  els.downloadArticlesCsv.addEventListener("click", downloadArticlesCsv);
+  els.cancelArticleEdit.addEventListener("click", closeArticleForm);
+  els.articleForm.addEventListener("submit", onArticleFormSubmit);
+
+  els.articlesTableBody.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action]");
+    if (!button) return;
+
+    const action = button.dataset.action;
+    const id = Number(button.dataset.id);
+
+    if (action === "edit") {
+      const article = state.articles.find((item) => item.id === id);
+      if (article) openArticleForm(article);
+      return;
+    }
+
+    if (action === "rename") {
+      renameArticle(id);
+      return;
+    }
+
+    if (action === "delete") {
+      markArticleDeleted(id);
+      return;
+    }
+
+    if (action === "restore") {
+      restoreArticle(id);
+    }
+  });
+}
+
+function onFileUploaded(event) {
+  const [file] = event.target.files || [];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    loadOperationsFromText(String(reader.result || ""), file.name);
+  };
+  reader.onerror = () => {
+    els.fileStatus.textContent = "Ошибка чтения файла. Проверьте CSV и повторите.";
+  };
+
+  reader.readAsText(file, "utf-8");
+}
+
+function loadOperationsFromText(csvText, sourceName) {
+  try {
+    const parsed = parseOperationsCsv(csvText);
+    state.operationsRaw = parsed;
+
+    const dates = parsed
+      .map((row) => row.dateObj)
+      .sort((a, b) => a.getTime() - b.getTime());
+
+    if (dates.length > 0) {
+      els.dateFromInput.value = toDateInputValue(dates[0]);
+      els.dateToInput.value = toDateInputValue(dates[dates.length - 1]);
+    }
+
+    els.fileStatus.textContent = `Загружено: ${sourceName}. Операций: ${parsed.length}.`;
+    renderReport();
+  } catch (error) {
+    state.operationsRaw = [];
+    renderReport();
+    els.fileStatus.textContent = `Ошибка: ${error.message}`;
+  }
+}
+
+function parseOperationsCsv(text) {
+  const cleanText = text.replace(/^\uFEFF/, "").trim();
+  if (!cleanText) throw new Error("CSV пустой.");
+
+  const firstLine = cleanText.split("\n")[0] || "";
+  const delimiter = (firstLine.match(/;/g) || []).length >= (firstLine.match(/,/g) || []).length ? ";" : ",";
+  const rows = parseCsv(cleanText, delimiter);
+
+  if (rows.length < 2) throw new Error("В CSV нет данных.");
+
+  const headers = rows[0].map((header) => normalizeText(header));
+  const idxDate = findColumn(headers, ["дата", "date"]);
+  const idxArticle = findColumn(headers, ["статья ддс", "статья", "фонд", "article"]);
+  const idxAmount = findColumn(headers, ["сумма", "amount", "итого", "sum"]);
+  const idxType = findColumn(headers, ["группа", "вид операции", "операция", "тип"]);
+
+  if (idxDate === -1) throw new Error("Не найдена колонка 'Дата'.");
+  if (idxArticle === -1) throw new Error("Не найдена колонка 'Статья ДДС' или 'Фонд'.");
+  if (idxAmount === -1) throw new Error("Не найдена колонка 'Сумма'.");
+
+  return rows
+    .slice(1)
+    .map((cells, rowIdx) => {
+      const dateRaw = String(cells[idxDate] || "").trim();
+      const articleRaw = String(cells[idxArticle] || "").trim();
+      const amountRaw = String(cells[idxAmount] || "").trim();
+      const typeRaw = idxType >= 0 ? String(cells[idxType] || "").trim() : "";
+
+      const dateObj = parseFlexibleDate(dateRaw);
+      if (!dateObj) throw new Error(`Неверная дата в строке ${rowIdx + 2}: ${dateRaw}`);
+
+      const amountValue = parseAmount(amountRaw);
+      if (amountValue === null) throw new Error(`Неверная сумма в строке ${rowIdx + 2}: ${amountRaw}`);
+
+      return {
+        dateRaw,
+        dateObj,
+        articleInput: articleRaw,
+        amount: Math.abs(amountValue),
+        direction: resolveOperationType(typeRaw, amountValue),
+      };
+    })
+    .filter((row) => row.articleInput !== "");
+}
+
+function renderReport() {
+  const filteredOperations = getFilteredOperations();
+  state.filteredOperations = filteredOperations;
+
+  const { reportRows, totalsByActivity, grandTotals } = aggregateByArticle(filteredOperations);
+  state.reportRows = reportRows;
+
+  const monthRows = aggregateByMonth(filteredOperations);
+  state.monthRows = monthRows;
+
+  const unknownCount = filteredOperations.filter((op) => op.activity === "Не определено").length;
+
+  renderReportMetrics(grandTotals, filteredOperations.length, unknownCount);
+  renderReportTable(reportRows, totalsByActivity, grandTotals);
+  renderMonthTable(monthRows);
+}
+
+function getFilteredOperations() {
+  const from = els.dateFromInput.value ? parseFlexibleDate(els.dateFromInput.value) : null;
+  const to = els.dateToInput.value ? parseFlexibleDate(els.dateToInput.value) : null;
+  const activity = els.activityFilter.value;
+  const articleMap = buildArticleMap(state.articles);
+
+  return state.operationsRaw
+    .map((op) => enrichOperation(op, articleMap))
+    .filter((op) => {
+      const inFromRange = !from || op.dateObj >= from;
+      const inToRange = !to || op.dateObj <= to;
+      const activityOk = activity === "all" || op.activity === activity;
+      return inFromRange && inToRange && activityOk;
+    });
+}
+
+function enrichOperation(operation, articleMap) {
+  const matched = findArticle(operation.articleInput, articleMap);
+
+  return {
+    ...operation,
+    article: matched?.name || operation.articleInput,
+    activity: matched?.activity || "Не определено",
+  };
+}
+
+function aggregateByArticle(operations) {
+  const grouped = new Map();
+
+  operations.forEach((op) => {
+    const key = `${op.activity}___${op.article}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        activity: op.activity,
+        article: op.article,
+        inAmount: 0,
+        outAmount: 0,
+        count: 0,
+      });
+    }
+
+    const bucket = grouped.get(key);
+    if (op.direction === "Поступление") bucket.inAmount += op.amount;
+    else bucket.outAmount += op.amount;
+    bucket.count += 1;
+  });
+
+  const reportRows = [...grouped.values()].map((row) => ({
+    ...row,
+    net: row.inAmount - row.outAmount,
+  }));
+
+  reportRows.sort((a, b) => {
+    const activityOrder = a.activity.localeCompare(b.activity, "ru");
+    if (activityOrder !== 0) return activityOrder;
+    return a.article.localeCompare(b.article, "ru");
+  });
+
+  const totalsByActivity = new Map();
+
+  reportRows.forEach((row) => {
+    if (!totalsByActivity.has(row.activity)) {
+      totalsByActivity.set(row.activity, { inAmount: 0, outAmount: 0, net: 0, count: 0 });
+    }
+
+    const totals = totalsByActivity.get(row.activity);
+    totals.inAmount += row.inAmount;
+    totals.outAmount += row.outAmount;
+    totals.net += row.net;
+    totals.count += row.count;
+  });
+
+  const grandTotals = {
+    inAmount: reportRows.reduce((sum, row) => sum + row.inAmount, 0),
+    outAmount: reportRows.reduce((sum, row) => sum + row.outAmount, 0),
+    net: reportRows.reduce((sum, row) => sum + row.net, 0),
+    count: reportRows.reduce((sum, row) => sum + row.count, 0),
+  };
+
+  return { reportRows, totalsByActivity, grandTotals };
+}
+
+function aggregateByMonth(operations) {
+  const monthMap = new Map();
+
+  operations.forEach((op) => {
+    const monthKey = `${op.dateObj.getFullYear()}-${String(op.dateObj.getMonth() + 1).padStart(2, "0")}`;
+
+    if (!monthMap.has(monthKey)) {
+      monthMap.set(monthKey, { month: monthKey, inAmount: 0, outAmount: 0 });
+    }
+
+    const bucket = monthMap.get(monthKey);
+    if (op.direction === "Поступление") bucket.inAmount += op.amount;
+    else bucket.outAmount += op.amount;
+  });
+
+  return [...monthMap.values()]
+    .map((row) => ({ ...row, net: row.inAmount - row.outAmount }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+}
+
+function renderReportMetrics(totals, operationCount, unknownCount) {
+  els.reportMetrics.innerHTML = `
+    <article class="metric"><div class="label">Операций</div><div class="value">${operationCount}</div></article>
+    <article class="metric"><div class="label">Поступления</div><div class="value">${formatMoney(totals.inAmount)}</div></article>
+    <article class="metric"><div class="label">Выбытия</div><div class="value">${formatMoney(totals.outAmount)}</div></article>
+    <article class="metric"><div class="label">Чистый поток</div><div class="value">${formatMoney(totals.net)}</div></article>
+    <article class="metric"><div class="label">Не сопоставлено</div><div class="value">${unknownCount}</div></article>
+  `;
+}
+
+function renderReportTable(rows, totalsByActivity, grandTotals) {
+  if (rows.length === 0) {
+    els.reportTableBody.innerHTML = `<tr><td colspan="6" class="empty">Загрузите CSV операций для расчета ДДС.</td></tr>`;
+    return;
+  }
+
+  let html = "";
+
+  rows.forEach((row, index) => {
+    html += `
+      <tr>
+        <td>${escapeHtml(row.activity)}</td>
+        <td>${escapeHtml(row.article)}</td>
+        <td>${formatMoney(row.inAmount)}</td>
+        <td>${formatMoney(row.outAmount)}</td>
+        <td>${formatMoney(row.net)}</td>
+        <td>${row.count}</td>
+      </tr>
+    `;
+
+    const nextActivity = rows[index + 1]?.activity;
+    if (row.activity !== nextActivity) {
+      const totals = totalsByActivity.get(row.activity);
+      html += `
+        <tr class="section-total">
+          <td colspan="2">Итого: ${escapeHtml(row.activity)}</td>
+          <td>${formatMoney(totals.inAmount)}</td>
+          <td>${formatMoney(totals.outAmount)}</td>
+          <td>${formatMoney(totals.net)}</td>
+          <td>${totals.count}</td>
+        </tr>
+      `;
+    }
+  });
+
+  html += `
+    <tr class="grand-total">
+      <td colspan="2">Итого по ДДС</td>
+      <td>${formatMoney(grandTotals.inAmount)}</td>
+      <td>${formatMoney(grandTotals.outAmount)}</td>
+      <td>${formatMoney(grandTotals.net)}</td>
+      <td>${grandTotals.count}</td>
+    </tr>
+  `;
+
+  els.reportTableBody.innerHTML = html;
+}
+
+function renderMonthTable(monthRows) {
+  if (monthRows.length === 0) {
+    els.monthTableBody.innerHTML = `<tr><td colspan="4" class="empty">Нет данных.</td></tr>`;
+    return;
+  }
+
+  els.monthTableBody.innerHTML = monthRows
+    .map(
+      (row) => `
+      <tr>
+        <td>${row.month}</td>
+        <td>${formatMoney(row.inAmount)}</td>
+        <td>${formatMoney(row.outAmount)}</td>
+        <td>${formatMoney(row.net)}</td>
+      </tr>`
+    )
+    .join("");
+}
+
+function refreshReportActivityOptions() {
+  const currentValue = els.activityFilter.value || "all";
+  const activities = uniqueValues(
+    state.articles.filter((row) => row.status !== "DELETE").map((row) => row.activity).filter(Boolean)
+  );
+
+  els.activityFilter.innerHTML = `<option value="all">Все</option>`;
+
+  activities.forEach((activity) => {
+    const option = document.createElement("option");
+    option.value = activity;
+    option.textContent = activity;
+    els.activityFilter.append(option);
+  });
+
+  const unknown = document.createElement("option");
+  unknown.value = "Не определено";
+  unknown.textContent = "Не определено";
+  els.activityFilter.append(unknown);
+
+  const canRestore = [...els.activityFilter.options].some((option) => option.value === currentValue);
+  els.activityFilter.value = canRestore ? currentValue : "all";
+}
+
+function renderArticlesTable() {
+  const rows = getFilteredArticles();
+
+  if (rows.length === 0) {
+    els.articlesTableBody.innerHTML = `<tr><td colspan="8" class="empty">По фильтрам ничего не найдено.</td></tr>`;
+    return;
+  }
+
+  els.articlesTableBody.innerHTML = rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(row.articleNoRaw)}</td>
+        <td>${escapeHtml(row.name)}</td>
+        <td>${escapeHtml(row.group)}</td>
+        <td>${escapeHtml(row.activity)}</td>
+        <td>${escapeHtml(row.description)}</td>
+        <td>${escapeHtml(row.comment)}</td>
+        <td><span class="badge ${row.status}">${statusLabel(row.status)}</span></td>
+        <td>
+          <div class="actions">
+            <button class="secondary" type="button" data-action="edit" data-id="${row.id}">Редакт.</button>
+            <button class="secondary" type="button" data-action="rename" data-id="${row.id}">Переим.</button>
+            ${
+              row.status === "DELETE"
+                ? `<button class="secondary" type="button" data-action="restore" data-id="${row.id}">Восстановить</button>`
+                : `<button class="secondary" type="button" data-action="delete" data-id="${row.id}">Удалить</button>`
+            }
+          </div>
+        </td>
+      </tr>
+    `
+    )
+    .join("");
+}
+
+function getFilteredArticles() {
+  const query = normalizeText(els.articleSearch.value);
+  const group = els.articleGroupFilter.value;
+  const activity = els.articleActivityFilter.value;
+  const status = els.articleStatusFilter.value;
+
+  return [...state.articles]
+    .filter((row) => {
+      const haystack = normalizeText(
+        `${row.articleNoRaw} ${row.name} ${row.group} ${row.activity} ${row.description} ${row.comment}`
+      );
+
+      const byQuery = !query || haystack.includes(query);
+      const byGroup = group === "all" || row.group === group;
+      const byActivity = activity === "all" || row.activity === activity;
+      const byStatus = status === "all" || row.status === status;
+
+      return byQuery && byGroup && byActivity && byStatus;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+
+function refreshArticleFilterOptions() {
+  updateSelectOptions(els.articleGroupFilter, state.articles.map((row) => row.group));
+  updateSelectOptions(els.articleActivityFilter, state.articles.map((row) => row.activity));
+}
+
+function updateSelectOptions(selectElement, values) {
+  const selectedValue = selectElement.value || "all";
+  const options = uniqueValues(values.filter(Boolean));
+
+  selectElement.innerHTML = `<option value="all">Все</option>`;
+
+  options.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    selectElement.append(option);
+  });
+
+  const canRestore = [...selectElement.options].some((option) => option.value === selectedValue);
+  selectElement.value = canRestore ? selectedValue : "all";
+}
+
+function openArticleForm(article) {
+  els.articleForm.classList.remove("hidden");
+
+  if (!article) {
+    els.articleId.value = "";
+    els.articleNoInput.value = "";
+    els.articleNameInput.value = "";
+    els.articleGroupInput.value = "Поступление";
+    els.articleActivityInput.value = "01 Операционная деятельность";
+    els.articleSourceInput.value = "";
+    els.articleStatusInput.value = "ACTIVE";
+    els.articleDescriptionInput.value = "";
+    els.articleCommentInput.value = "";
+    return;
+  }
+
+  els.articleId.value = String(article.id);
+  els.articleNoInput.value = article.articleNoRaw;
+  els.articleNameInput.value = article.name;
+  els.articleGroupInput.value = article.group || "Поступление";
+  els.articleActivityInput.value = article.activity || "";
+  els.articleSourceInput.value = article.source || "";
+  els.articleStatusInput.value = article.status || "ACTIVE";
+  els.articleDescriptionInput.value = article.description || "";
+  els.articleCommentInput.value = article.comment || "";
+}
+
+function closeArticleForm() {
+  els.articleForm.classList.add("hidden");
+  els.articleForm.reset();
+  els.articleId.value = "";
+}
+
+function onArticleFormSubmit(event) {
+  event.preventDefault();
+
+  const id = Number(els.articleId.value);
+  const name = els.articleNameInput.value.trim();
+
+  if (!name) {
+    alert("Введите название статьи.");
+    return;
+  }
+
+  const payload = {
+    articleNoRaw: els.articleNoInput.value.trim(),
+    name,
+    group: els.articleGroupInput.value,
+    activity: els.articleActivityInput.value.trim() || "Не определено",
+    description: els.articleDescriptionInput.value.trim(),
+    source: els.articleSourceInput.value.trim(),
+    comment: els.articleCommentInput.value.trim(),
+    status: els.articleStatusInput.value,
+  };
+
+  if (id) {
+    state.articles = state.articles.map((row) => (row.id === id ? { ...row, ...payload } : row));
+  } else {
+    state.articles.push({
+      id: getNextArticleId(),
+      aliases: [],
+      ...payload,
+    });
+  }
+
+  persistAndRerenderAfterArticleChange();
+  closeArticleForm();
+}
+
+function renameArticle(id) {
+  const article = state.articles.find((item) => item.id === id);
+  if (!article) return;
+
+  const nextName = window.prompt("Новое название статьи", article.name);
+  if (!nextName) return;
+
+  const cleanName = nextName.trim();
+  if (!cleanName) return;
+
+  state.articles = state.articles.map((item) => {
+    if (item.id !== id) return item;
+
+    const aliases = uniqueValues([...(item.aliases || []), item.name].filter(Boolean));
+    return { ...item, name: cleanName, aliases };
+  });
+
+  persistAndRerenderAfterArticleChange();
+}
+
+function markArticleDeleted(id) {
+  const article = state.articles.find((item) => item.id === id);
+  if (!article) return;
+
+  const confirmed = window.confirm(`Пометить статью "${article.name}" как удаленную?`);
+  if (!confirmed) return;
+
+  state.articles = state.articles.map((item) =>
+    item.id === id ? { ...item, status: "DELETE" } : item
+  );
+
+  persistAndRerenderAfterArticleChange();
+}
+
+function restoreArticle(id) {
+  state.articles = state.articles.map((item) => (item.id === id ? { ...item, status: "ACTIVE" } : item));
+  persistAndRerenderAfterArticleChange();
+}
+
+function persistAndRerenderAfterArticleChange() {
+  saveArticles(state.articles);
+  refreshArticleFilterOptions();
+  refreshReportActivityOptions();
+  renderArticlesTable();
+  renderReport();
+}
+
+function getNextArticleId() {
+  return state.articles.reduce((max, row) => Math.max(max, row.id), 0) + 1;
+}
+
+function resetReportFilters() {
+  els.dateFromInput.value = "";
+  els.dateToInput.value = "";
+  els.activityFilter.value = "all";
+  renderReport();
+}
+
+function downloadTemplateCsv() {
+  const blob = new Blob([SAMPLE_OPERATIONS], { type: "text/csv;charset=utf-8;" });
+  triggerDownload(blob, "dds-operations-template.csv");
+}
+
+function downloadReportCsv() {
+  if (state.reportRows.length === 0) {
+    els.fileStatus.textContent = "Сначала загрузите операции CSV, затем выгружайте отчет.";
+    return;
+  }
+
+  const lines = [["Вид деятельности", "Статья ДДС", "Поступления", "Выбытия", "Чистый поток", "Операций"]];
+
+  state.reportRows.forEach((row) => {
+    lines.push([
+      row.activity,
+      row.article,
+      formatNumberForCsv(row.inAmount),
+      formatNumberForCsv(row.outAmount),
+      formatNumberForCsv(row.net),
+      String(row.count),
+    ]);
+  });
+
+  const csv = lines
+    .map((line) => line.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(";"))
+    .join("\n");
+
+  triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), "dds-report.csv");
+}
+
+function downloadArticlesCsv() {
+  const headers = [
+    "№ статьи",
+    "Статья ДДС",
+    "Группа",
+    "Вид деятельности",
+    "Описание",
+    "Источник",
+    "Комментарий",
+    "Статус",
+  ];
+
+  const lines = state.articles
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, "ru"))
+    .map((row) => [
+      row.articleNoRaw,
+      row.name,
+      row.group,
+      row.activity,
+      row.description,
+      row.source,
+      row.comment,
+      statusLabel(row.status),
+    ]);
+
+  const csv = [headers, ...lines]
+    .map((line) => line.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(";"))
+    .join("\n");
+
+  triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), "dds-articles.csv");
+}
+
+function triggerDownload(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function parseRawArticles(raw) {
   return raw
     .trim()
     .split("\n")
@@ -113,6 +780,7 @@ function parseArticleRows(raw) {
 
       return {
         id: idx + 1,
+        aliases: [],
         articleNoRaw,
         name,
         group,
@@ -135,138 +803,95 @@ function resolveArticleStatus(articleNoRaw, comment) {
   return "ACTIVE";
 }
 
-function buildArticleMap(items) {
-  const map = new Map();
-
-  items.forEach((row) => {
-    map.set(normalizeText(row.name), row);
-
-    const renameTargetPrefix = "поменять на ";
-    const noRaw = normalizeText(row.articleNoRaw);
-    if (noRaw.startsWith(renameTargetPrefix)) {
-      const renamedTo = row.articleNoRaw.slice(renameTargetPrefix.length).trim();
-      if (renamedTo) {
-        map.set(normalizeText(renamedTo), {
-          ...row,
-          name: renamedTo,
-          status: "ACTIVE",
-        });
+function loadArticles() {
+  try {
+    const raw = localStorage.getItem(STORAGE_ARTICLES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((row, idx) => normalizeArticle(row, idx));
       }
     }
-  });
+  } catch (error) {
+    console.warn("Cannot load articles from localStorage", error);
+  }
+
+  return parseRawArticles(RAW_ARTICLES);
+}
+
+function saveArticles(articles) {
+  try {
+    localStorage.setItem(STORAGE_ARTICLES_KEY, JSON.stringify(articles));
+  } catch (error) {
+    console.warn("Cannot save articles to localStorage", error);
+  }
+}
+
+function normalizeArticle(row, idx) {
+  const aliases = Array.isArray(row.aliases)
+    ? row.aliases.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+
+  return {
+    id: Number(row.id) || idx + 1,
+    aliases: uniqueValues(aliases),
+    articleNoRaw: String(row.articleNoRaw || ""),
+    name: String(row.name || ""),
+    group: String(row.group || ""),
+    activity: String(row.activity || "Не определено"),
+    description: String(row.description || ""),
+    source: String(row.source || ""),
+    comment: String(row.comment || ""),
+    status: ["ACTIVE", "INACTIVE", "DELETE", "RENAME"].includes(row.status) ? row.status : "ACTIVE",
+  };
+}
+
+function buildArticleMap(articles) {
+  const map = new Map();
+
+  articles
+    .filter((row) => row.status !== "DELETE")
+    .forEach((row) => {
+      const nameKey = normalizeText(row.name);
+      if (nameKey) map.set(nameKey, row);
+
+      (row.aliases || []).forEach((alias) => {
+        const aliasKey = normalizeText(alias);
+        if (aliasKey) map.set(aliasKey, row);
+      });
+
+      const rawNo = normalizeText(row.articleNoRaw);
+      const prefix = "поменять на ";
+      if (rawNo.startsWith(prefix)) {
+        const nextName = row.articleNoRaw.slice(prefix.length).trim();
+        if (nextName) {
+          map.set(normalizeText(nextName), {
+            ...row,
+            name: nextName,
+            status: "ACTIVE",
+          });
+        }
+      }
+    });
 
   return map;
 }
 
-function fillActivityFilter() {
-  const activities = [...new Set(activeArticleRows.map((row) => row.activity))].sort((a, b) =>
-    a.localeCompare(b, "ru")
-  );
+function findArticle(input, articleMap) {
+  const normalized = normalizeText(input);
+  if (!normalized) return null;
 
-  activities.forEach((activity) => {
-    const option = document.createElement("option");
-    option.value = activity;
-    option.textContent = activity;
-    activityFilter.append(option);
-  });
-
-  const unknown = document.createElement("option");
-  unknown.value = "Не определено";
-  unknown.textContent = "Не определено";
-  activityFilter.append(unknown);
-}
-
-function onFileUploaded(event) {
-  const [file] = event.target.files || [];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = () => {
-    const text = String(reader.result || "");
-    loadOperationsFromText(text, file.name);
-  };
-  reader.onerror = () => {
-    fileStatus.textContent = "Ошибка чтения файла. Проверьте CSV и повторите.";
-  };
-
-  reader.readAsText(file, "utf-8");
-}
-
-function loadOperationsFromText(csvText, sourceName) {
-  try {
-    const parsed = parseOperationsCsv(csvText);
-    state.operations = parsed;
-
-    const dates = parsed
-      .map((row) => row.dateObj)
-      .filter(Boolean)
-      .sort((a, b) => a.getTime() - b.getTime());
-
-    if (dates.length > 0) {
-      dateFromInput.value = toDateInputValue(dates[0]);
-      dateToInput.value = toDateInputValue(dates[dates.length - 1]);
-    }
-
-    fileStatus.textContent = `Загружено: ${sourceName}. Операций: ${parsed.length}.`;
-    renderReport();
-  } catch (error) {
-    state.operations = [];
-    renderReport();
-    fileStatus.textContent = `Ошибка: ${error.message}`;
+  if (articleMap.has(normalized)) {
+    return articleMap.get(normalized);
   }
-}
 
-function parseOperationsCsv(text) {
-  const cleanText = text.replace(/^\uFEFF/, "").trim();
-  if (!cleanText) throw new Error("CSV пустой.");
+  for (const [name, row] of articleMap.entries()) {
+    if (normalized.includes(name) || name.includes(normalized)) {
+      return row;
+    }
+  }
 
-  const firstLine = cleanText.split("\n")[0] || "";
-  const delimiter = (firstLine.match(/;/g) || []).length >= (firstLine.match(/,/g) || []).length ? ";" : ",";
-
-  const rows = parseCsv(cleanText, delimiter);
-  if (rows.length < 2) throw new Error("В CSV нет данных.");
-
-  const headers = rows[0].map((header) => normalizeText(header));
-
-  const idxDate = findColumn(headers, ["дата", "date"]);
-  const idxArticle = findColumn(headers, ["статья ддс", "статья", "фонд", "article"]);
-  const idxAmount = findColumn(headers, ["сумма", "amount", "итого", "sum"]);
-  const idxType = findColumn(headers, ["группа", "вид операции", "операция", "тип"]);
-
-  if (idxDate === -1) throw new Error("Не найдена колонка 'Дата'.");
-  if (idxArticle === -1) throw new Error("Не найдена колонка 'Статья ДДС' или 'Фонд'.");
-  if (idxAmount === -1) throw new Error("Не найдена колонка 'Сумма'.");
-
-  return rows
-    .slice(1)
-    .map((cells, rowIdx) => {
-      const dateRaw = (cells[idxDate] || "").trim();
-      const articleRaw = (cells[idxArticle] || "").trim();
-      const amountRaw = (cells[idxAmount] || "").trim();
-      const typeRaw = idxType >= 0 ? (cells[idxType] || "").trim() : "";
-
-      const amountValue = parseAmount(amountRaw);
-      if (amountValue === null) return null;
-
-      const dateObj = parseFlexibleDate(dateRaw);
-      if (!dateObj) {
-        throw new Error(`Неверная дата в строке ${rowIdx + 2}: ${dateRaw}`);
-      }
-
-      const matched = findArticle(articleRaw);
-      const type = resolveOperationType(typeRaw, amountValue, matched?.group);
-
-      return {
-        dateRaw,
-        dateObj,
-        articleInput: articleRaw,
-        article: matched?.name || articleRaw,
-        activity: matched?.activity || "Не определено",
-        amount: Math.abs(amountValue),
-        direction: type,
-      };
-    })
-    .filter(Boolean);
+  return null;
 }
 
 function parseCsv(text, delimiter) {
@@ -323,7 +948,6 @@ function parseAmount(raw) {
   let cleaned = String(raw || "").trim().replace(/\s/g, "").replace(/[^\d,.-]/g, "");
   if (!cleaned) return null;
 
-  // Supports both 1,234.56 and 1.234,56 formats.
   if (cleaned.includes(",") && cleaned.includes(".")) {
     if (cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".")) {
       cleaned = cleaned.replace(/\./g, "").replace(",", ".");
@@ -341,7 +965,7 @@ function parseAmount(raw) {
 function parseFlexibleDate(raw) {
   if (!raw) return null;
 
-  const clean = raw.trim();
+  const clean = String(raw).trim();
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
     const date = new Date(`${clean}T00:00:00`);
@@ -378,285 +1002,17 @@ function parseFlexibleDate(raw) {
   return date;
 }
 
-function resolveOperationType(typeRaw, amountValue, defaultGroup) {
+function resolveOperationType(typeRaw, amountValue) {
   const normalized = normalizeText(typeRaw);
 
   if (normalized.includes("поступ")) return "Поступление";
   if (normalized.includes("выбыт") || normalized.includes("расход")) return "Выбытие";
 
-  if (defaultGroup === "Поступление" || defaultGroup === "Выбытие") return defaultGroup;
-
   return amountValue < 0 ? "Выбытие" : "Поступление";
 }
 
-function findArticle(input) {
-  const normalized = normalizeText(input);
-
-  if (articleByName.has(normalized)) {
-    return articleByName.get(normalized);
-  }
-
-  for (const [articleName, row] of articleByName.entries()) {
-    if (normalized.includes(articleName) || articleName.includes(normalized)) {
-      return row;
-    }
-  }
-
-  return null;
-}
-
-function renderReport() {
-  const filteredOperations = getFilteredOperations();
-  state.filteredOperations = filteredOperations;
-
-  const { reportRows, totalsByActivity, grandTotals } = aggregateByArticle(filteredOperations);
-  state.reportRows = reportRows;
-
-  const monthRows = aggregateByMonth(filteredOperations);
-  state.monthRows = monthRows;
-
-  const unknownCount = filteredOperations.filter((op) => op.activity === "Не определено").length;
-  renderMetrics(grandTotals, filteredOperations.length, unknownCount);
-  renderReportTable(reportRows, totalsByActivity, grandTotals);
-  renderMonthTable(monthRows);
-}
-
-function getFilteredOperations() {
-  const from = dateFromInput.value ? parseFlexibleDate(dateFromInput.value) : null;
-  const to = dateToInput.value ? parseFlexibleDate(dateToInput.value) : null;
-  const activity = activityFilter.value;
-
-  return state.operations.filter((op) => {
-    const inFromRange = !from || op.dateObj >= from;
-    const inToRange = !to || op.dateObj <= to;
-    const activityOk = activity === "all" || op.activity === activity;
-
-    return inFromRange && inToRange && activityOk;
-  });
-}
-
-function aggregateByArticle(operations) {
-  const grouped = new Map();
-
-  operations.forEach((op) => {
-    const key = `${op.activity}___${op.article}`;
-    if (!grouped.has(key)) {
-      grouped.set(key, {
-        activity: op.activity,
-        article: op.article,
-        inAmount: 0,
-        outAmount: 0,
-        count: 0,
-      });
-    }
-
-    const bucket = grouped.get(key);
-    if (op.direction === "Поступление") bucket.inAmount += op.amount;
-    else bucket.outAmount += op.amount;
-    bucket.count += 1;
-  });
-
-  const reportRows = [...grouped.values()].map((row) => ({
-    ...row,
-    net: row.inAmount - row.outAmount,
-  }));
-
-  reportRows.sort((a, b) => {
-    const activityOrder = a.activity.localeCompare(b.activity, "ru");
-    if (activityOrder !== 0) return activityOrder;
-    return a.article.localeCompare(b.article, "ru");
-  });
-
-  const totalsByActivity = new Map();
-  reportRows.forEach((row) => {
-    if (!totalsByActivity.has(row.activity)) {
-      totalsByActivity.set(row.activity, { inAmount: 0, outAmount: 0, net: 0, count: 0 });
-    }
-    const totals = totalsByActivity.get(row.activity);
-    totals.inAmount += row.inAmount;
-    totals.outAmount += row.outAmount;
-    totals.net += row.net;
-    totals.count += row.count;
-  });
-
-  const grandTotals = {
-    inAmount: reportRows.reduce((sum, row) => sum + row.inAmount, 0),
-    outAmount: reportRows.reduce((sum, row) => sum + row.outAmount, 0),
-    net: reportRows.reduce((sum, row) => sum + row.net, 0),
-    count: reportRows.reduce((sum, row) => sum + row.count, 0),
-  };
-
-  return { reportRows, totalsByActivity, grandTotals };
-}
-
-function aggregateByMonth(operations) {
-  const monthMap = new Map();
-
-  operations.forEach((op) => {
-    const monthKey = `${op.dateObj.getFullYear()}-${String(op.dateObj.getMonth() + 1).padStart(2, "0")}`;
-
-    if (!monthMap.has(monthKey)) {
-      monthMap.set(monthKey, { month: monthKey, inAmount: 0, outAmount: 0 });
-    }
-
-    const bucket = monthMap.get(monthKey);
-    if (op.direction === "Поступление") bucket.inAmount += op.amount;
-    else bucket.outAmount += op.amount;
-  });
-
-  return [...monthMap.values()]
-    .map((row) => ({ ...row, net: row.inAmount - row.outAmount }))
-    .sort((a, b) => a.month.localeCompare(b.month));
-}
-
-function renderMetrics(totals, operationCount, unknownCount) {
-  reportMetrics.innerHTML = `
-    <article class="metric"><div class="label">Операций</div><div class="value">${operationCount}</div></article>
-    <article class="metric"><div class="label">Поступления</div><div class="value">${formatMoney(totals.inAmount)}</div></article>
-    <article class="metric"><div class="label">Выбытия</div><div class="value">${formatMoney(totals.outAmount)}</div></article>
-    <article class="metric"><div class="label">Чистый поток</div><div class="value">${formatMoney(totals.net)}</div></article>
-    <article class="metric"><div class="label">Не сопоставлено со справочником</div><div class="value">${unknownCount}</div></article>
-  `;
-}
-
-function renderReportTable(rows, totalsByActivity, grandTotals) {
-  if (rows.length === 0) {
-    reportTableBody.innerHTML = `<tr><td colspan="6" class="empty">Загрузите CSV операций для расчета ДДС.</td></tr>`;
-    return;
-  }
-
-  let html = "";
-
-  rows.forEach((row, index) => {
-    html += `
-      <tr>
-        <td>${escapeHtml(row.activity)}</td>
-        <td>${escapeHtml(row.article)}</td>
-        <td>${formatMoney(row.inAmount)}</td>
-        <td>${formatMoney(row.outAmount)}</td>
-        <td>${formatMoney(row.net)}</td>
-        <td>${row.count}</td>
-      </tr>
-    `;
-
-    const nextActivity = rows[index + 1]?.activity;
-    if (row.activity !== nextActivity) {
-      const t = totalsByActivity.get(row.activity);
-      html += `
-        <tr class="section-total">
-          <td colspan="2">Итого: ${escapeHtml(row.activity)}</td>
-          <td>${formatMoney(t.inAmount)}</td>
-          <td>${formatMoney(t.outAmount)}</td>
-          <td>${formatMoney(t.net)}</td>
-          <td>${t.count}</td>
-        </tr>
-      `;
-    }
-  });
-
-  html += `
-    <tr class="grand-total">
-      <td colspan="2">Итого по ДДС</td>
-      <td>${formatMoney(grandTotals.inAmount)}</td>
-      <td>${formatMoney(grandTotals.outAmount)}</td>
-      <td>${formatMoney(grandTotals.net)}</td>
-      <td>${grandTotals.count}</td>
-    </tr>
-  `;
-
-  reportTableBody.innerHTML = html;
-}
-
-function renderMonthTable(monthRows) {
-  if (monthRows.length === 0) {
-    monthTableBody.innerHTML = `<tr><td colspan="4" class="empty">Нет данных.</td></tr>`;
-    return;
-  }
-
-  monthTableBody.innerHTML = monthRows
-    .map(
-      (row) => `
-      <tr>
-        <td>${row.month}</td>
-        <td>${formatMoney(row.inAmount)}</td>
-        <td>${formatMoney(row.outAmount)}</td>
-        <td>${formatMoney(row.net)}</td>
-      </tr>`
-    )
-    .join("");
-}
-
-function renderDictionary() {
-  const query = normalizeText(dictionarySearch.value || "");
-
-  const filtered = articleRows.filter((row) => {
-    if (!query) return true;
-    return normalizeText(`${row.articleNoRaw} ${row.name} ${row.activity}`).includes(query);
-  });
-
-  dictionaryBody.innerHTML = filtered
-    .map(
-      (row) => `
-      <tr>
-        <td>${escapeHtml(row.articleNoRaw)}</td>
-        <td>${escapeHtml(row.name)}</td>
-        <td>${escapeHtml(row.group)}</td>
-        <td>${escapeHtml(row.activity)}</td>
-        <td><span class="badge ${row.status}">${statusLabel(row.status)}</span></td>
-      </tr>
-    `
-    )
-    .join("");
-}
-
-function resetFilters() {
-  dateFromInput.value = "";
-  dateToInput.value = "";
-  activityFilter.value = "all";
-  renderReport();
-}
-
-function downloadTemplateCsv() {
-  const blob = new Blob([SAMPLE_OPERATIONS], { type: "text/csv;charset=utf-8;" });
-  triggerDownload(blob, "dds-operations-template.csv");
-}
-
-function downloadReportCsv() {
-  if (state.reportRows.length === 0) {
-    fileStatus.textContent = "Сначала загрузите операции CSV, затем выгружайте отчет.";
-    return;
-  }
-
-  const lines = [["Вид деятельности", "Статья ДДС", "Поступления", "Выбытия", "Чистый поток", "Операций"]];
-
-  state.reportRows.forEach((row) => {
-    lines.push([
-      row.activity,
-      row.article,
-      formatNumberForCsv(row.inAmount),
-      formatNumberForCsv(row.outAmount),
-      formatNumberForCsv(row.net),
-      String(row.count),
-    ]);
-  });
-
-  const csv = lines
-    .map((line) => line.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(";"))
-    .join("\n");
-
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  triggerDownload(blob, "dds-report.csv");
-}
-
-function triggerDownload(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+function uniqueValues(values) {
+  return [...new Set(values)].sort((a, b) => a.localeCompare(b, "ru"));
 }
 
 function toDateInputValue(date) {
@@ -687,7 +1043,7 @@ function normalizeText(value) {
 }
 
 function statusLabel(status) {
-  if (status === "DELETE") return "Удалить";
+  if (status === "DELETE") return "Удалено";
   if (status === "RENAME") return "Переименовать";
   if (status === "INACTIVE") return "Неактуально";
   return "Активно";
