@@ -207,6 +207,38 @@
           </div>
         </section>
 
+        <section class="card">
+          <h2>Фильтр банков</h2>
+          <div class="controls-grid banks-filter-grid">
+            <label>
+              Поиск счета/банка
+              <input id="banksSearch" type="search" placeholder="Название счета, банк, юрлицо" />
+            </label>
+
+            <label>
+              Статус
+              <select id="banksStatusFilter">
+                <option value="active">Только активные</option>
+                <option value="all">Все</option>
+                <option value="deleted">Только удаленные</option>
+              </select>
+            </label>
+
+            <label>
+              Наличие данных
+              <select id="banksDataFilter">
+                <option value="all">Любые</option>
+                <option value="with-data">Только с данными</option>
+                <option value="without-data">Только без данных</option>
+              </select>
+            </label>
+
+            <button id="banksExpandWithData" type="button" class="secondary">Развернуть с данными</button>
+            <button id="banksCollapseAll" type="button" class="secondary">Свернуть все</button>
+          </div>
+          <p id="banksFilterStatus" class="status">Показаны все счета.</p>
+        </section>
+
         <section id="banksEntityBlocks" class="banks-entities"></section>
 
         <section class="table-card">

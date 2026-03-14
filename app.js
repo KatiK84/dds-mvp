@@ -73,6 +73,12 @@ const state = {
   activeTab: "report",
   articles: loadArticles(),
   banks: loadBanksState(),
+  banksUi: {
+    search: "",
+    status: "active",
+    data: "all",
+    expandedByAccountId: {},
+  },
   operationsRaw: [],
   manualAssignments: {},
   filteredOperations: [],
@@ -94,6 +100,12 @@ const els = {
   banksEntitySummaryBody: document.getElementById("banksEntitySummaryBody"),
   banksEntityBlocks: document.getElementById("banksEntityBlocks"),
   banksGlobalSummaryBody: document.getElementById("banksGlobalSummaryBody"),
+  banksSearch: document.getElementById("banksSearch"),
+  banksStatusFilter: document.getElementById("banksStatusFilter"),
+  banksDataFilter: document.getElementById("banksDataFilter"),
+  banksExpandWithData: document.getElementById("banksExpandWithData"),
+  banksCollapseAll: document.getElementById("banksCollapseAll"),
+  banksFilterStatus: document.getElementById("banksFilterStatus"),
   operationsFile: document.getElementById("operationsFile"),
   loadSampleBtn: document.getElementById("loadSampleBtn"),
   downloadTemplateBtn: document.getElementById("downloadTemplateBtn"),
@@ -182,6 +194,32 @@ function bindReportEvents() {
 function bindBankEvents() {
   els.legalEntityForm.addEventListener("submit", onAddLegalEntity);
   els.bankAccountForm.addEventListener("submit", onAddBankAccount);
+  els.banksSearch.addEventListener("input", () => {
+    state.banksUi.search = String(els.banksSearch.value || "").trim();
+    renderBanksTab();
+  });
+  els.banksStatusFilter.addEventListener("change", () => {
+    state.banksUi.status = String(els.banksStatusFilter.value || "active");
+    renderBanksTab();
+  });
+  els.banksDataFilter.addEventListener("change", () => {
+    state.banksUi.data = String(els.banksDataFilter.value || "all");
+    renderBanksTab();
+  });
+  els.banksExpandWithData.addEventListener("click", () => {
+    const next = {};
+    state.banks.accounts.forEach((account) => {
+      if (account.summary && account.status !== "DELETED") {
+        next[account.id] = true;
+      }
+    });
+    state.banksUi.expandedByAccountId = next;
+    renderBanksTab();
+  });
+  els.banksCollapseAll.addEventListener("click", () => {
+    state.banksUi.expandedByAccountId = {};
+    renderBanksTab();
+  });
 
   els.banksEntityBlocks.addEventListener("change", (event) => {
     const parserSelect = event.target.closest("select[data-bank-parser]");
@@ -235,6 +273,17 @@ function bindBankEvents() {
 
     if (action === "delete") {
       deleteBankAccountSafely(accountId);
+      return;
+    }
+
+    if (action === "toggle-details") {
+      const expanded = Boolean(state.banksUi.expandedByAccountId[accountId]);
+      if (expanded) {
+        delete state.banksUi.expandedByAccountId[accountId];
+      } else {
+        state.banksUi.expandedByAccountId[accountId] = true;
+      }
+      renderBanksTab();
       return;
     }
 
@@ -775,6 +824,9 @@ function summarizeBankTransactions(transactions, manualOpeningBalances = {}) {
 
 function renderBanksTab() {
   refreshBankEntitySelect();
+  els.banksSearch.value = state.banksUi.search;
+  els.banksStatusFilter.value = state.banksUi.status;
+  els.banksDataFilter.value = state.banksUi.data;
 
   const entitySummaries = state.banks.legalEntities.map((entity) => {
     const accounts = state.banks.accounts.filter((account) => account.legalEntityId === entity.id);
@@ -787,122 +839,192 @@ function renderBanksTab() {
     };
   });
 
-  renderBanksEntityBlocks(entitySummaries);
+  const visibleAccountIds = getVisibleBankAccountIds();
+  renderBanksEntityBlocks(entitySummaries, visibleAccountIds);
   renderBanksEntitySummaryTable(entitySummaries);
   renderBanksGlobalSummary(entitySummaries);
+  renderBanksFilterStatus(visibleAccountIds);
 }
 
-function renderBanksEntityBlocks(entitySummaries) {
+function renderBanksEntityBlocks(entitySummaries, visibleAccountIds) {
+  const hasAnyAccounts = entitySummaries.some(({ accounts }) => accounts.length > 0);
+  const hasVisibleAccounts = [...visibleAccountIds].length > 0;
+
+  if (!hasAnyAccounts) {
+    els.banksEntityBlocks.innerHTML = `<div class="empty">Пока нет добавленных счетов.</div>`;
+    return;
+  }
+
+  if (!hasVisibleAccounts) {
+    els.banksEntityBlocks.innerHTML = `<div class="empty">Нет счетов, подходящих под текущие фильтры.</div>`;
+    return;
+  }
+
   els.banksEntityBlocks.innerHTML = entitySummaries
     .map(({ entity, accounts, summary }) => {
-      const accountsHtml =
-        accounts.length === 0
-          ? `<div class="empty">Пока нет добавленных счетов.</div>`
-          : accounts
-              .map((account) => {
-                const isDeleted = account.status === "DELETED";
-                const loadedMonths = getLoadedStatementMonths(account);
-                const defaultUploadMonth = loadedMonths[0] || getCurrentMonthKey();
-                const parserProfile = BANK_PARSER_PROFILES.some((item) => item.value === account.parserProfile)
-                  ? account.parserProfile
-                  : "auto";
-                const defaultManualOpeningMonth = getDefaultManualOpeningMonth(account);
-                const manualOpeningValue = getManualOpeningBalance(account, defaultManualOpeningMonth);
-                const parserOptions = BANK_PARSER_PROFILES.map(
-                  (item) =>
-                    `<option value="${item.value}" ${item.value === parserProfile ? "selected" : ""}>${item.label}</option>`
-                ).join("");
-                const loadedMonthsHtml =
-                  loadedMonths.length === 0
-                    ? `<span class="month-pill empty">нет</span>`
-                    : loadedMonths
-                        .map(
-                          (month) => `<span class="month-pill">
-                            ${month}
-                            ${
-                              isDeleted
-                                ? ""
-                                : `<button type="button" class="inline-link danger" data-bank-action="remove-month" data-account-id="${account.id}" data-month="${month}">Удалить</button>`
-                            }
-                          </span>`
-                        )
-                        .join("");
-                const status = account.summary
-                  ? `Файл: ${escapeHtml(account.fileName)}. Последняя дата: ${formatDate(account.summary.latestDate)}`
-                  : "Выписка не загружена.";
+      const visibleAccounts = accounts.filter((account) => visibleAccountIds.has(account.id));
+      if (visibleAccounts.length === 0) return "";
 
-                return `
-                <article class="bank-account-card">
-                  <div class="bank-account-head">
-                    <div class="bank-account-name">${escapeHtml(account.name)}</div>
-                    <div class="bank-account-meta">
-                      <span class="badge ${isDeleted ? "DELETE" : "ACTIVE"}">${isDeleted ? "Удален" : "Активен"}</span>
-                      <div class="bank-account-actions">
+      const accountsHtml = visibleAccounts
+        .map((account) => {
+          const isDeleted = account.status === "DELETED";
+          const isExpanded = Boolean(state.banksUi.expandedByAccountId[account.id]);
+          const loadedMonths = getLoadedStatementMonths(account);
+          const defaultUploadMonth = loadedMonths[0] || getCurrentMonthKey();
+          const parserProfile = BANK_PARSER_PROFILES.some((item) => item.value === account.parserProfile)
+            ? account.parserProfile
+            : "auto";
+          const defaultManualOpeningMonth = getDefaultManualOpeningMonth(account);
+          const manualOpeningValue = getManualOpeningBalance(account, defaultManualOpeningMonth);
+          const parserOptions = BANK_PARSER_PROFILES.map(
+            (item) =>
+              `<option value="${item.value}" ${item.value === parserProfile ? "selected" : ""}>${item.label}</option>`
+          ).join("");
+          const loadedMonthsHtml =
+            loadedMonths.length === 0
+              ? `<span class="month-pill empty">нет</span>`
+              : loadedMonths
+                  .map(
+                    (month) => `<span class="month-pill">
+                        ${month}
                         ${
                           isDeleted
-                            ? `<button type="button" class="secondary" data-bank-action="restore" data-account-id="${account.id}">Восстановить</button>`
-                            : `<button type="button" class="secondary" data-bank-action="delete" data-account-id="${account.id}">Удалить</button>`
+                            ? ""
+                            : `<button type="button" class="inline-link danger" data-bank-action="remove-month" data-account-id="${account.id}" data-month="${month}">Удалить</button>`
                         }
-                      </div>
-                    </div>
+                      </span>`
+                  )
+                  .join("");
+          const status = account.summary
+            ? `Файл: ${escapeHtml(account.fileName)}. Последняя дата: ${formatDate(account.summary.latestDate)}`
+            : "Выписка не загружена.";
+          const compactMetrics = account.summary
+            ? `<div class="bank-quick-metrics">
+                  <span>Начало: <strong>${formatMaybeMoney(account.summary.openingBalance)}</strong></span>
+                  <span>Конец: <strong>${formatMaybeMoney(account.summary.monthEndBalance)}</strong></span>
+                  <span>Поступления: <strong>${formatMoney(account.summary.inflow)}</strong></span>
+                  <span>Выбытия: <strong>${formatMoney(account.summary.outflow)}</strong></span>
+                </div>`
+            : `<div class="bank-quick-metrics"><span>Нет загруженных данных</span></div>`;
+
+          return `
+            <article class="bank-account-card ${isExpanded ? "expanded" : "collapsed"}">
+              <div class="bank-account-head">
+                <div class="bank-account-title">
+                  <div class="bank-account-name">${escapeHtml(account.name)}</div>
+                  <div class="bank-account-inline-meta">
+                    <span class="badge ${isDeleted ? "DELETE" : "ACTIVE"}">${isDeleted ? "Удален" : "Активен"}</span>
+                    <span class="bank-status">Месяцев загружено: ${loadedMonths.length}</span>
                   </div>
-                  <div class="bank-upload">
-                    <input
-                      type="month"
-                      data-bank-month="${account.id}"
-                      value="${defaultUploadMonth}"
-                      ${isDeleted ? "disabled" : ""}
-                    />
-                    <select data-bank-parser data-account-id="${account.id}" ${isDeleted ? "disabled" : ""}>
-                      ${parserOptions}
-                    </select>
-                    <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" ${isDeleted ? "disabled" : ""} />
-                    <span class="bank-status">${status}</span>
-                  </div>
-                  <div class="bank-manual-opening">
-                    <span class="bank-status">Ручной остаток на начало месяца</span>
-                    <input
-                      type="month"
-                      data-bank-opening-month
-                      data-account-id="${account.id}"
-                      value="${defaultManualOpeningMonth}"
-                      ${isDeleted ? "disabled" : ""}
-                    />
-                    <input
-                      type="text"
-                      data-bank-opening-amount
-                      data-account-id="${account.id}"
-                      placeholder="например 12500,00"
-                      value="${Number.isFinite(manualOpeningValue) ? formatNumberForInput(manualOpeningValue) : ""}"
-                      ${isDeleted ? "disabled" : ""}
-                    />
-                    <button type="button" class="secondary" data-bank-action="save-opening" data-account-id="${account.id}" ${
-                      isDeleted ? "disabled" : ""
-                    }>
-                      Сохранить
+                  ${compactMetrics}
+                </div>
+                <div class="bank-account-meta">
+                  <div class="bank-account-actions">
+                    <button type="button" class="secondary" data-bank-action="toggle-details" data-account-id="${account.id}">
+                      ${isExpanded ? "Свернуть" : "Развернуть"}
                     </button>
-                    <button type="button" class="secondary" data-bank-action="clear-opening" data-account-id="${account.id}" ${
-                      isDeleted ? "disabled" : ""
-                    }>
-                      Очистить
-                    </button>
+                    ${
+                      isDeleted
+                        ? `<button type="button" class="secondary" data-bank-action="restore" data-account-id="${account.id}">Восстановить</button>`
+                        : `<button type="button" class="secondary" data-bank-action="delete" data-account-id="${account.id}">Удалить</button>`
+                    }
                   </div>
-                  <div class="bank-status">
-                    Загруженные месяцы: <span class="months-inline">${loadedMonthsHtml}</span>
-                  </div>
-                  ${renderBankAccountSummary(account.summary, account.transactions, account.manualOpeningBalances)}
-                </article>`;
-              })
-              .join("");
+                </div>
+              </div>
+              <div class="bank-account-body ${isExpanded ? "" : "is-collapsed"}">
+                <div class="bank-upload">
+                  <input
+                    type="month"
+                    data-bank-month="${account.id}"
+                    value="${defaultUploadMonth}"
+                    ${isDeleted ? "disabled" : ""}
+                  />
+                  <select data-bank-parser data-account-id="${account.id}" ${isDeleted ? "disabled" : ""}>
+                    ${parserOptions}
+                  </select>
+                  <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" ${isDeleted ? "disabled" : ""} />
+                  <span class="bank-status">${status}</span>
+                </div>
+                <div class="bank-manual-opening">
+                  <span class="bank-status">Ручной остаток на начало месяца</span>
+                  <input
+                    type="month"
+                    data-bank-opening-month
+                    data-account-id="${account.id}"
+                    value="${defaultManualOpeningMonth}"
+                    ${isDeleted ? "disabled" : ""}
+                  />
+                  <input
+                    type="text"
+                    data-bank-opening-amount
+                    data-account-id="${account.id}"
+                    placeholder="например 12500,00"
+                    value="${Number.isFinite(manualOpeningValue) ? formatNumberForInput(manualOpeningValue) : ""}"
+                    ${isDeleted ? "disabled" : ""}
+                  />
+                  <button type="button" class="secondary" data-bank-action="save-opening" data-account-id="${account.id}" ${
+                    isDeleted ? "disabled" : ""
+                  }>
+                    Сохранить
+                  </button>
+                  <button type="button" class="secondary" data-bank-action="clear-opening" data-account-id="${account.id}" ${
+                    isDeleted ? "disabled" : ""
+                  }>
+                    Очистить
+                  </button>
+                </div>
+                <div class="bank-status">
+                  Загруженные месяцы: <span class="months-inline">${loadedMonthsHtml}</span>
+                </div>
+                ${renderBankAccountSummary(account.summary, account.transactions, account.manualOpeningBalances)}
+              </div>
+            </article>`;
+        })
+        .join("");
 
       return `
-      <section class="bank-entity-card">
-        <h3>${escapeHtml(entity.name)}</h3>
-        <div class="bank-accounts">${accountsHtml}</div>
-        ${renderMiniSummaryTable(summary)}
-      </section>`;
+        <section class="bank-entity-card">
+          <h3>${escapeHtml(entity.name)}</h3>
+          <div class="bank-accounts">${accountsHtml}</div>
+          ${renderMiniSummaryTable(summary)}
+        </section>`;
     })
     .join("");
+}
+
+function getVisibleBankAccountIds() {
+  const statusFilter = String(state.banksUi.status || "active");
+  const dataFilter = String(state.banksUi.data || "all");
+  const searchNeedle = normalizeText(state.banksUi.search || "");
+  const legalEntityById = new Map(state.banks.legalEntities.map((entity) => [entity.id, entity.name]));
+
+  const visible = state.banks.accounts.filter((account) => {
+    if (statusFilter === "active" && account.status === "DELETED") return false;
+    if (statusFilter === "deleted" && account.status !== "DELETED") return false;
+
+    const hasData = Boolean(account.summary);
+    if (dataFilter === "with-data" && !hasData) return false;
+    if (dataFilter === "without-data" && hasData) return false;
+
+    if (searchNeedle) {
+      const haystack = normalizeText(
+        `${account.name || ""} ${account.fileName || ""} ${legalEntityById.get(account.legalEntityId) || ""}`
+      );
+      if (!haystack.includes(searchNeedle)) return false;
+    }
+
+    return true;
+  });
+
+  return new Set(visible.map((account) => account.id));
+}
+
+function renderBanksFilterStatus(visibleAccountIds) {
+  const total = state.banks.accounts.length;
+  const visible = [...visibleAccountIds].length;
+  const active = state.banks.accounts.filter((account) => account.status !== "DELETED").length;
+  const withData = state.banks.accounts.filter((account) => account.summary).length;
+  els.banksFilterStatus.textContent = `Показано счетов: ${visible} из ${total}. Активных: ${active}. С данными: ${withData}.`;
 }
 
 function renderBankAccountSummary(summary, transactions, manualOpeningBalances = {}) {
