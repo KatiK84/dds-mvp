@@ -97,10 +97,23 @@ h2 {
 .file-field,
 .controls label,
 .article-filters label,
-.form-grid label {
+.form-grid label,
+.inline-check {
   display: grid;
   gap: 6px;
   font-size: 0.88rem;
+}
+
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+}
+
+.inline-check input {
+  width: 16px;
+  height: 16px;
 }
 
 input,
@@ -240,6 +253,10 @@ tr.section-total {
 tr.grand-total {
   background: #e4ede7;
   font-weight: 700;
+}
+
+tr.unresolved-row {
+  background: var(--danger-soft);
 }
 
 .actions {

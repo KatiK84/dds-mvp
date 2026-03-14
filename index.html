@@ -15,6 +15,7 @@
 
       <nav class="tabs" aria-label="Разделы приложения">
         <button class="tab-btn active" data-tab="report">Отчет ДДС</button>
+        <button class="tab-btn" data-tab="reconcile">Разнесение платежей</button>
         <button class="tab-btn" data-tab="articles">Статьи ДДС</button>
       </nav>
 
@@ -22,8 +23,8 @@
         <section class="card importer">
           <h2>1. Загрузка операций</h2>
           <p class="hint">
-            Ожидаемые поля CSV: <code>Дата</code>, <code>Статья ДДС</code>, <code>Сумма</code>,
-            <code>Группа</code> (опционально: Поступление/Выбытие).
+            Ожидаемые поля CSV: <code>Дата</code>, <code>Сумма</code>, <code>Статья ДДС</code> (может быть пустой),
+            <code>Группа</code> (опционально: Поступление/Выбытие), <code>Контрагент</code> (опционально).
           </p>
 
           <div class="import-actions">
@@ -97,6 +98,46 @@
                 </tr>
               </thead>
               <tbody id="monthTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="reconcileTab">
+        <section class="card">
+          <h2>Разнесение операций без статьи</h2>
+          <p class="hint">
+            Платежи без статьи или с неизвестной статьей подсвечены красным. Выберите статью из списка и
+            примените назначение.
+          </p>
+
+          <div class="controls-grid">
+            <label class="inline-check">
+              <input id="unresolvedOnly" type="checkbox" checked />
+              <span>Показывать только неразнесенные</span>
+            </label>
+            <button id="downloadUnresolvedCsv" type="button" class="secondary">
+              Скачать неразнесенные CSV
+            </button>
+          </div>
+
+          <p id="reconcileStatus" class="status">Загрузите CSV на вкладке "Отчет ДДС".</p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Контрагент</th>
+                  <th>Комментарий</th>
+                  <th>Статья из файла</th>
+                  <th>Сумма</th>
+                  <th>Группа</th>
+                  <th>Назначить статью</th>
+                  <th>Действие</th>
+                </tr>
+              </thead>
+              <tbody id="reconcileTableBody"></tbody>
             </table>
           </div>
         </section>
