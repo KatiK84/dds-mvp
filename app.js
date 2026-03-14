@@ -519,6 +519,7 @@ function renderBanksEntityBlocks(entitySummaries) {
                     <input type="file" accept=".csv,text/csv" data-bank-upload="1" data-account-id="${account.id}" ${isDeleted ? "disabled" : ""} />
                     <span class="bank-status">${status}</span>
                   </div>
+                  ${renderBankAccountSummary(account.summary, account.transactions)}
                 </article>`;
               })
               .join("");
@@ -531,6 +532,111 @@ function renderBanksEntityBlocks(entitySummaries) {
       </section>`;
     })
     .join("");
+}
+
+function renderBankAccountSummary(summary, transactions) {
+  if (!summary) {
+    return `<div class="bank-account-summary empty">Нет данных по банку.</div>`;
+  }
+
+  const monthlyRows = summarizeBankTransactionsByMonth(transactions || []);
+  const monthlyTableHtml = renderBankAccountMonthlyTable(monthlyRows);
+
+  return `
+    <div class="bank-account-summary">
+      <div class="bank-metric"><span>Начало месяца</span><strong>${formatMaybeMoney(summary.openingBalance)}</strong></div>
+      <div class="bank-metric"><span>Конец месяца</span><strong>${formatMaybeMoney(summary.monthEndBalance)}</strong></div>
+      <div class="bank-metric"><span>Последняя дата</span><strong>${formatDate(summary.latestDate)}</strong></div>
+      <div class="bank-metric"><span>Остаток на последнюю дату</span><strong>${formatMaybeMoney(summary.latestBalance)}</strong></div>
+      <div class="bank-metric"><span>Поступления</span><strong>${formatMoney(summary.inflow)}</strong></div>
+      <div class="bank-metric"><span>Выбытия</span><strong>${formatMoney(summary.outflow)}</strong></div>
+    </div>
+    ${monthlyTableHtml}
+  `;
+}
+
+function summarizeBankTransactionsByMonth(transactions) {
+  if (!transactions || transactions.length === 0) return [];
+
+  const sorted = [...transactions].sort((a, b) => {
+    const byDate = a.dateObj.getTime() - b.dateObj.getTime();
+    return byDate !== 0 ? byDate : (a.idx || 0) - (b.idx || 0);
+  });
+
+  const grouped = new Map();
+
+  sorted.forEach((tx) => {
+    const monthKey = `${tx.dateObj.getFullYear()}-${String(tx.dateObj.getMonth() + 1).padStart(2, "0")}`;
+
+    if (!grouped.has(monthKey)) {
+      grouped.set(monthKey, {
+        month: monthKey,
+        transactions: [],
+      });
+    }
+
+    grouped.get(monthKey).transactions.push(tx);
+  });
+
+  return [...grouped.values()]
+    .map(({ month, transactions: monthTx }) => {
+      const firstWithBalance = monthTx.find((tx) => tx.balance !== null) || null;
+      const lastWithBalance = [...monthTx].reverse().find((tx) => tx.balance !== null) || null;
+
+      const openingBalance = firstWithBalance ? firstWithBalance.balance - firstWithBalance.amount : null;
+      const endBalance = lastWithBalance ? lastWithBalance.balance : null;
+
+      const inflow = monthTx.filter((tx) => tx.amount > 0).reduce((sum, tx) => sum + tx.amount, 0);
+      const outflow = monthTx.filter((tx) => tx.amount < 0).reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+
+      return {
+        month,
+        openingBalance,
+        endBalance,
+        inflow,
+        outflow,
+        net: inflow - outflow,
+      };
+    })
+    .sort((a, b) => b.month.localeCompare(a.month));
+}
+
+function renderBankAccountMonthlyTable(monthlyRows) {
+  if (!monthlyRows || monthlyRows.length === 0) {
+    return `<div class="bank-account-monthly empty">Нет помесячных данных.</div>`;
+  }
+
+  return `
+    <div class="bank-account-monthly table-wrap small">
+      <table>
+        <thead>
+          <tr>
+            <th>Месяц</th>
+            <th>Начало месяца</th>
+            <th>Конец месяца</th>
+            <th>Поступления</th>
+            <th>Выбытия</th>
+            <th>Чистый поток</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${monthlyRows
+            .map(
+              (row) => `
+            <tr>
+              <td>${row.month}</td>
+              <td>${formatMaybeMoney(row.openingBalance)}</td>
+              <td>${formatMaybeMoney(row.endBalance)}</td>
+              <td>${formatMoney(row.inflow)}</td>
+              <td>${formatMoney(row.outflow)}</td>
+              <td>${formatMoney(row.net)}</td>
+            </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 function renderMiniSummaryTable(summary) {
