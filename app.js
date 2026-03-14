@@ -104,6 +104,7 @@ const els = {
   resetFiltersBtn: document.getElementById("resetFilters"),
   downloadReportCsvBtn: document.getElementById("downloadReportCsv"),
   reportMetrics: document.getElementById("reportMetrics"),
+  shortDdsTableBody: document.getElementById("shortDdsTableBody"),
   reportTableBody: document.getElementById("reportTableBody"),
   monthTableBody: document.getElementById("monthTableBody"),
   unresolvedOnly: document.getElementById("unresolvedOnly"),
@@ -727,7 +728,9 @@ function parseBankStatementCsv(text, parserProfile = "auto", options = {}) {
     });
 
   if (parsedRows.length === 0) {
-    throw new Error("Не удалось прочитать строки выписки: проверьте формат CSV и названия колонок.");
+    throw new Error(
+      `Не удалось прочитать строки выписки: проверьте формат CSV и названия колонок. Профиль: ${parserProfile}, разделитель: ${csvCandidate.delimiterLabel}.`
+    );
   }
 
   return parsedRows;
@@ -1326,6 +1329,7 @@ function renderReport() {
   const unknownCount = filteredOperations.filter((op) => op.unresolved).length;
 
   renderReportMetrics(grandTotals, filteredOperations.length, unknownCount);
+  renderShortDdsTable(totalsByActivity, grandTotals, reportRows.length);
   renderReportTable(reportRows, totalsByActivity, grandTotals);
   renderMonthTable(monthRows);
   renderReconcileTable();
@@ -1448,6 +1452,59 @@ function renderReportMetrics(totals, operationCount, unknownCount) {
     <article class="metric"><div class="label">Чистый поток</div><div class="value">${formatMoney(totals.net)}</div></article>
     <article class="metric"><div class="label">Не сопоставлено</div><div class="value">${unknownCount}</div></article>
   `;
+}
+
+function renderShortDdsTable(totalsByActivity, grandTotals, reportRowsCount) {
+  if (!els.shortDdsTableBody) return;
+
+  if (reportRowsCount === 0) {
+    els.shortDdsTableBody.innerHTML = `<tr><td colspan="4" class="empty">Загрузите CSV операций для расчета ДДС.</td></tr>`;
+    return;
+  }
+
+  const activityRows = [
+    { label: "01 Операционная деятельность", prefix: "01 " },
+    { label: "02 Инвестиционная деятельность", prefix: "02 " },
+    { label: "03 Финансовая деятельность", prefix: "03 " },
+  ];
+
+  let html = activityRows
+    .map((item) => {
+      const totals = summarizeTotalsByActivityPrefix(totalsByActivity, item.prefix);
+      return `
+      <tr>
+        <td>${escapeHtml(item.label)}</td>
+        <td>${formatMoney(totals.inAmount)}</td>
+        <td>${formatMoney(totals.outAmount)}</td>
+        <td>${formatMoney(totals.net)}</td>
+      </tr>`;
+    })
+    .join("");
+
+  html += `
+    <tr class="grand-total">
+      <td>Итого по ДДС</td>
+      <td>${formatMoney(grandTotals.inAmount)}</td>
+      <td>${formatMoney(grandTotals.outAmount)}</td>
+      <td>${formatMoney(grandTotals.net)}</td>
+    </tr>
+  `;
+
+  els.shortDdsTableBody.innerHTML = html;
+}
+
+function summarizeTotalsByActivityPrefix(totalsByActivity, prefix) {
+  const normalizedPrefix = normalizeText(prefix);
+  const summary = { inAmount: 0, outAmount: 0, net: 0 };
+
+  for (const [activity, totals] of totalsByActivity.entries()) {
+    if (!normalizeText(activity).startsWith(normalizedPrefix)) continue;
+    summary.inAmount += totals.inAmount || 0;
+    summary.outAmount += totals.outAmount || 0;
+    summary.net += totals.net || 0;
+  }
+
+  return summary;
 }
 
 function renderReportTable(rows, totalsByActivity, grandTotals) {
@@ -2591,10 +2648,22 @@ function parseFlexibleDateWithYearHint(raw, monthHint) {
   const parsed = parseFlexibleDate(raw);
   if (parsed) return parsed;
 
-  if (!monthHint || !Number.isFinite(monthHint.year) || !Number.isFinite(monthHint.month)) return null;
   const clean = String(raw || "").trim();
+  if (!clean) return null;
+
+  const embeddedFullDate = clean.match(/(\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})/);
+  if (embeddedFullDate) {
+    const fromEmbedded = parseFlexibleDate(embeddedFullDate[1]);
+    if (fromEmbedded) return fromEmbedded;
+  }
+
+  if (!monthHint || !Number.isFinite(monthHint.year) || !Number.isFinite(monthHint.month)) return null;
   const shortDate = clean.match(/^(\d{1,2})[./-](\d{1,2})[./-]?$/);
-  if (!shortDate) return null;
+  if (!shortDate) {
+    const embeddedShortDate = clean.match(/(\d{1,2}[./-]\d{1,2})(?![./-]\d)/);
+    if (!embeddedShortDate) return null;
+    return parseFlexibleDateWithYearHint(embeddedShortDate[1], monthHint);
+  }
 
   const day = Number(shortDate[1]);
   const month = Number(shortDate[2]);
