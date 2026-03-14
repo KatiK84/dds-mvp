@@ -85,6 +85,7 @@ const els = {
   bankAccountForm: document.getElementById("bankAccountForm"),
   bankAccountNameInput: document.getElementById("bankAccountNameInput"),
   bankAccountEntitySelect: document.getElementById("bankAccountEntitySelect"),
+  resetBanksDataBtn: document.getElementById("resetBanksDataBtn"),
   banksEntitySummaryBody: document.getElementById("banksEntitySummaryBody"),
   banksEntityBlocks: document.getElementById("banksEntityBlocks"),
   banksGlobalSummaryBody: document.getElementById("banksGlobalSummaryBody"),
@@ -127,6 +128,7 @@ const els = {
 init();
 
 function init() {
+  cleanupLegacyPlaceholderEntities(true);
   bindTabs();
   bindReportEvents();
   bindBankEvents();
@@ -174,6 +176,7 @@ function bindReportEvents() {
 function bindBankEvents() {
   els.legalEntityForm.addEventListener("submit", onAddLegalEntity);
   els.bankAccountForm.addEventListener("submit", onAddBankAccount);
+  els.resetBanksDataBtn.addEventListener("click", resetBanksData);
 
   els.banksEntityBlocks.addEventListener("change", (event) => {
     const input = event.target.closest("input[data-bank-upload='1']");
@@ -185,6 +188,18 @@ function bindBankEvents() {
 
     uploadBankStatement(accountId, file);
   });
+}
+
+function resetBanksData() {
+  const confirmed = window.confirm("Сбросить все юрлица, счета и загруженные банковские выписки?");
+  if (!confirmed) return;
+
+  state.banks = {
+    legalEntities: [],
+    accounts: [],
+  };
+
+  persistBanksAndRender();
 }
 
 function onAddLegalEntity(event) {
@@ -1450,6 +1465,21 @@ function normalizeBanksState(rawState, fallback) {
     legalEntities: normalizedEntities,
     accounts,
   };
+}
+
+function cleanupLegacyPlaceholderEntities(persist) {
+  const entities = state.banks.legalEntities || [];
+  const onlyPlaceholders =
+    entities.length > 0 && entities.every((entity) => /^Юрлицо\s+\d+$/i.test(String(entity.name || "").trim()));
+
+  if (!onlyPlaceholders) return;
+
+  state.banks.legalEntities = [];
+  state.banks.accounts = (state.banks.accounts || []).map((account) => ({ ...account, legalEntityId: 0 }));
+
+  if (persist) {
+    saveBanksState(state.banks);
+  }
 }
 
 function normalizeBankAccount(account, idx) {
