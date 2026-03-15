@@ -80,6 +80,7 @@ const STORAGE_PLAN_KEY = "dds_mvp_plan_v1";
 const STORAGE_ANALYTICS_KEY = "dds_mvp_analytics_v1";
 const STORAGE_RUNTIME_KEY = "dds_mvp_runtime_v1";
 const STORAGE_OBLIGATIONS_KEY = "dds_mvp_obligations_v1";
+const STORAGE_BANK_DDS_RECON_KEY = "dds_mvp_bank_dds_recon_v1";
 const CHANGE_LOG_LIMIT = 3000;
 const ANALYTICS_PRIMARY_FINDINGS_LIMIT = 7;
 const UNKNOWN_ARTICLE = "Статья неизвестна";
@@ -164,6 +165,7 @@ const state = {
   plan: loadPlanState(),
   analytics: loadAnalyticsState(),
   obligations: loadObligationsState(),
+  bankDdsRecon: loadBankDdsReconState(),
   access: loadAccessState(),
   changeLog: loadChangeLog(),
   banksUi: {
@@ -221,6 +223,7 @@ const els = {
   analyticsTab: document.getElementById("analyticsTab"),
   banksTab: document.getElementById("banksTab"),
   reconcileTab: document.getElementById("reconcileTab"),
+  bankDdsReconTab: document.getElementById("bankDdsReconTab"),
   articlesTab: document.getElementById("articlesTab"),
   changeLogTab: document.getElementById("changeLogTab"),
   changeLogSearch: document.getElementById("changeLogSearch"),
@@ -334,6 +337,19 @@ const els = {
   obligationSuggestBtn: document.getElementById("obligationSuggestBtn"),
   obligationSuggestStatus: document.getElementById("obligationSuggestStatus"),
   obligationSuggestBody: document.getElementById("obligationSuggestBody"),
+  bankDdsDateFrom: document.getElementById("bankDdsDateFrom"),
+  bankDdsDateTo: document.getElementById("bankDdsDateTo"),
+  bankDdsEntityFilter: document.getElementById("bankDdsEntityFilter"),
+  bankDdsAccountFilter: document.getElementById("bankDdsAccountFilter"),
+  bankDdsToleranceDays: document.getElementById("bankDdsToleranceDays"),
+  bankDdsRunBtn: document.getElementById("bankDdsRunBtn"),
+  bankDdsExportBtn: document.getElementById("bankDdsExportBtn"),
+  bankDdsClearDecisionsBtn: document.getElementById("bankDdsClearDecisionsBtn"),
+  bankDdsStatus: document.getElementById("bankDdsStatus"),
+  bankDdsMetrics: document.getElementById("bankDdsMetrics"),
+  bankDdsMatchesBody: document.getElementById("bankDdsMatchesBody"),
+  bankDdsMissingBankBody: document.getElementById("bankDdsMissingBankBody"),
+  bankDdsMissingDdsBody: document.getElementById("bankDdsMissingDdsBody"),
   analyticsSettingsForm: document.getElementById("analyticsSettingsForm"),
   analyticsDateFrom: document.getElementById("analyticsDateFrom"),
   analyticsDateTo: document.getElementById("analyticsDateTo"),
@@ -406,6 +422,7 @@ function init() {
   bindPlanEvents();
   bindObligationsEvents();
   bindAnalyticsEvents();
+  bindBankDdsReconEvents();
   bindBankEvents();
   bindReconcileEvents();
   bindArticleEvents();
@@ -422,6 +439,7 @@ function init() {
   renderPlanTab();
   renderObligationsTab();
   renderAnalyticsTab();
+  renderBankDdsReconTab();
   renderReconcileTable();
   renderChangeLog();
   applyRoleAccess();
@@ -452,6 +470,7 @@ function setActiveTab(tabName) {
   els.analyticsTab.classList.toggle("active", tabName === "analytics");
   els.banksTab.classList.toggle("active", tabName === "banks");
   els.reconcileTab.classList.toggle("active", tabName === "reconcile");
+  els.bankDdsReconTab.classList.toggle("active", tabName === "bankddsrecon");
   els.articlesTab.classList.toggle("active", tabName === "articles");
   els.changeLogTab.classList.toggle("active", tabName === "changelog");
 }
@@ -601,6 +620,8 @@ function applyRoleAccess() {
   setElementDisabled(els.bankFolderClearBtn, !canUploadBankStatements);
 
   setElementDisabled(els.downloadUnresolvedCsv, !canExportReconcile);
+  setElementDisabled(els.bankDdsExportBtn, !canExportReconcile);
+  setElementDisabled(els.bankDdsClearDecisionsBtn, !hasPermission("reconcile.assign"));
 
   setElementDisabled(els.addArticleBtn, !canManageArticles);
   setElementDisabled(els.downloadArticlesCsv, !canExportArticles);
@@ -835,6 +856,44 @@ function bindObligationsEvents() {
     if (!Number.isFinite(suggestId)) return;
     acceptObligationSuggestion(suggestId);
   });
+}
+
+function bindBankDdsReconEvents() {
+  els.bankDdsEntityFilter?.addEventListener("change", () => {
+    state.bankDdsRecon.filters.legalEntityId = Number(els.bankDdsEntityFilter.value) || 0;
+    state.bankDdsRecon.filters.accountId = 0;
+    saveBankDdsReconState(state.bankDdsRecon);
+    renderBankDdsReconTab();
+  });
+  els.bankDdsAccountFilter?.addEventListener("change", () => {
+    state.bankDdsRecon.filters.accountId = Number(els.bankDdsAccountFilter.value) || 0;
+    saveBankDdsReconState(state.bankDdsRecon);
+    renderBankDdsReconTab();
+  });
+  els.bankDdsDateFrom?.addEventListener("change", () => {
+    state.bankDdsRecon.filters.dateFrom = String(els.bankDdsDateFrom.value || "");
+    saveBankDdsReconState(state.bankDdsRecon);
+    renderBankDdsReconTab();
+  });
+  els.bankDdsDateTo?.addEventListener("change", () => {
+    state.bankDdsRecon.filters.dateTo = String(els.bankDdsDateTo.value || "");
+    saveBankDdsReconState(state.bankDdsRecon);
+    renderBankDdsReconTab();
+  });
+  els.bankDdsToleranceDays?.addEventListener("change", () => {
+    state.bankDdsRecon.filters.toleranceDays = normalizeIntInRange(els.bankDdsToleranceDays.value, 2, 0, 5);
+    saveBankDdsReconState(state.bankDdsRecon);
+    renderBankDdsReconTab();
+  });
+  els.bankDdsRunBtn?.addEventListener("click", () => {
+    saveBankDdsReconState(state.bankDdsRecon);
+    renderBankDdsReconTab(true);
+  });
+  els.bankDdsExportBtn?.addEventListener("click", downloadBankDdsReconDiffCsv);
+  els.bankDdsClearDecisionsBtn?.addEventListener("click", clearBankDdsReconDecisions);
+
+  els.bankDdsMissingBankBody?.addEventListener("click", onBankDdsMissingBankAction);
+  els.bankDdsMissingDdsBody?.addEventListener("click", onBankDdsMissingDdsAction);
 }
 
 function onPlanItemFormSubmit(event) {
@@ -5147,6 +5206,7 @@ function persistBanksAndRender() {
   saveBanksState(state.banks);
   renderBanksTab();
   renderObligationsTab();
+  renderBankDdsReconTab();
 }
 
 function refreshBankEntitySelect() {
@@ -5497,6 +5557,7 @@ function renderReport() {
   renderObligationsTab();
   renderAnalyticsTab();
   renderReconcileTable();
+  renderBankDdsReconTab();
   persistRuntimeState();
 }
 
@@ -5860,6 +5921,553 @@ function downloadUnresolvedCsv() {
     .join("\n");
 
   triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), "dds-unresolved.csv");
+}
+
+function renderBankDdsReconTab(forceRun = false) {
+  if (
+    !els.bankDdsStatus ||
+    !els.bankDdsMetrics ||
+    !els.bankDdsMatchesBody ||
+    !els.bankDdsMissingBankBody ||
+    !els.bankDdsMissingDdsBody
+  ) {
+    return;
+  }
+
+  ensureBankDdsReconFilters();
+  renderBankDdsReconFilterControls();
+  const snapshot = buildBankDdsReconSnapshot();
+  state.bankDdsRecon.latest = snapshot;
+
+  if (els.bankDdsDateFrom) els.bankDdsDateFrom.value = state.bankDdsRecon.filters.dateFrom;
+  if (els.bankDdsDateTo) els.bankDdsDateTo.value = state.bankDdsRecon.filters.dateTo;
+  if (els.bankDdsToleranceDays) {
+    els.bankDdsToleranceDays.value = String(normalizeIntInRange(state.bankDdsRecon.filters.toleranceDays, 2, 0, 5));
+  }
+
+  renderBankDdsReconMetrics(snapshot);
+  renderBankDdsReconMatches(snapshot.matches);
+  renderBankDdsReconMissingBank(snapshot.missingBank);
+  renderBankDdsReconMissingDds(snapshot.missingDds);
+
+  const modeText = forceRun ? "Сверка обновлена вручную." : "Сверка обновлена.";
+  els.bankDdsStatus.textContent =
+    `${modeText} Банк: ${snapshot.bankCount}; ДДС: ${snapshot.ddsCount}; ` +
+    `точных: ${snapshot.exactCount}; мягких: ${snapshot.softCount}; ` +
+    `не попало в ДДС: ${snapshot.missingBank.length}; лишнее в ДДС: ${snapshot.missingDds.length}; ` +
+    `игнор банка: ${snapshot.ignoredBankCount}; игнор ДДС: ${snapshot.ignoredDdsCount}.`;
+}
+
+function ensureBankDdsReconFilters() {
+  const filters = state.bankDdsRecon.filters || {};
+  const today = new Date();
+  const defaultFrom = els.dateFromInput?.value || toDateInputValue(new Date(today.getFullYear(), today.getMonth(), 1));
+  const defaultTo = els.dateToInput?.value || toDateInputValue(today);
+
+  filters.dateFrom = parseFlexibleDate(filters.dateFrom || "") ? toDateInputValue(parseFlexibleDate(filters.dateFrom || "")) : defaultFrom;
+  filters.dateTo = parseFlexibleDate(filters.dateTo || "") ? toDateInputValue(parseFlexibleDate(filters.dateTo || "")) : defaultTo;
+  filters.legalEntityId = Number(filters.legalEntityId) || 0;
+  filters.accountId = Number(filters.accountId) || 0;
+  filters.toleranceDays = normalizeIntInRange(filters.toleranceDays, 2, 0, 5);
+
+  const fromObj = parseFlexibleDate(filters.dateFrom || "");
+  const toObj = parseFlexibleDate(filters.dateTo || "");
+  if (fromObj && toObj && fromObj > toObj) {
+    const tmp = filters.dateFrom;
+    filters.dateFrom = filters.dateTo;
+    filters.dateTo = tmp;
+  }
+
+  state.bankDdsRecon.filters = filters;
+}
+
+function renderBankDdsReconFilterControls() {
+  if (!els.bankDdsEntityFilter || !els.bankDdsAccountFilter) return;
+  const filters = state.bankDdsRecon.filters || {};
+
+  const entityOptions = ['<option value="0">Все</option>'].concat(
+    (state.banks.legalEntities || []).map((entity) => `<option value="${entity.id}">${escapeHtml(entity.name)}</option>`)
+  );
+  els.bankDdsEntityFilter.innerHTML = entityOptions.join("");
+  const entityExists = [...els.bankDdsEntityFilter.options].some((opt) => Number(opt.value) === Number(filters.legalEntityId));
+  filters.legalEntityId = entityExists ? Number(filters.legalEntityId) : 0;
+  els.bankDdsEntityFilter.value = String(filters.legalEntityId);
+
+  const accountOptions = ['<option value="0">Все</option>'].concat(
+    getBankDdsReconAccounts(filters.legalEntityId).map((account) => `<option value="${account.id}">${escapeHtml(account.name)}</option>`)
+  );
+  els.bankDdsAccountFilter.innerHTML = accountOptions.join("");
+  const accountExists = [...els.bankDdsAccountFilter.options].some((opt) => Number(opt.value) === Number(filters.accountId));
+  filters.accountId = accountExists ? Number(filters.accountId) : 0;
+  els.bankDdsAccountFilter.value = String(filters.accountId);
+}
+
+function getBankDdsReconAccounts(legalEntityId = 0) {
+  return (state.banks.accounts || [])
+    .filter((account) => {
+      if (account.status === "DELETED") return false;
+      if (Number(legalEntityId) > 0 && Number(account.legalEntityId) !== Number(legalEntityId)) return false;
+      return true;
+    })
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ru"));
+}
+
+function buildBankDdsReconSnapshot() {
+  const filters = state.bankDdsRecon.filters || {};
+  const bankRows = collectBankRowsForRecon(filters);
+  const ddsRows = collectDdsRowsForRecon(filters);
+  const bankDecisions = state.bankDdsRecon.bankDecisions || {};
+  const ddsDecisions = state.bankDdsRecon.ddsDecisions || {};
+  const ignoredDdsIds = new Set(
+    Object.entries(ddsDecisions)
+      .filter(([, value]) => value?.status === "ignored")
+      .map(([rowId]) => Number(rowId))
+      .filter(Number.isFinite)
+  );
+
+  const ddsById = new Map(ddsRows.map((row) => [row.rowId, row]));
+  const ddsAvailable = ddsRows.filter((row) => !ignoredDdsIds.has(row.rowId));
+  const ddsUsed = new Set();
+  const matches = [];
+  let ignoredBankCount = 0;
+
+  const bankPool = [];
+  for (const bankRow of bankRows) {
+    const decision = bankDecisions[bankRow.uid];
+    if (decision?.status === "ignored") {
+      ignoredBankCount += 1;
+      continue;
+    }
+
+    if (decision?.status === "linked" && Number(decision.linkedRowId) > 0) {
+      const linked = ddsById.get(Number(decision.linkedRowId));
+      if (linked && !ignoredDdsIds.has(linked.rowId) && !ddsUsed.has(linked.uid)) {
+        const diffDays = daysBetween(bankRow.dateObj, linked.dateObj);
+        matches.push({
+          kind: "manual",
+          kindLabel: decision.mode === "tech" ? "Ручное (тех.)" : "Ручное",
+          diffDays,
+          bank: bankRow,
+          dds: linked,
+        });
+        ddsUsed.add(linked.uid);
+        continue;
+      }
+    }
+    bankPool.push(bankRow);
+  }
+
+  const exactBuckets = new Map();
+  ddsAvailable.forEach((row) => {
+    const key = buildBankDdsExactKey(row.dateObj, row.direction, row.amountCents);
+    if (!exactBuckets.has(key)) exactBuckets.set(key, []);
+    exactBuckets.get(key).push(row);
+  });
+
+  const unmatchedBankAfterExact = [];
+  for (const bankRow of bankPool) {
+    const key = buildBankDdsExactKey(bankRow.dateObj, bankRow.direction, bankRow.amountCents);
+    const candidates = (exactBuckets.get(key) || []).filter((row) => !ddsUsed.has(row.uid));
+    const matched = candidates[0];
+    if (matched) {
+      matches.push({
+        kind: "exact",
+        kindLabel: "Точное",
+        diffDays: 0,
+        bank: bankRow,
+        dds: matched,
+      });
+      ddsUsed.add(matched.uid);
+    } else {
+      unmatchedBankAfterExact.push(bankRow);
+    }
+  }
+
+  const tolerance = normalizeIntInRange(filters.toleranceDays, 2, 0, 5);
+  const missingBank = [];
+
+  for (const bankRow of unmatchedBankAfterExact) {
+    const candidate = ddsAvailable
+      .filter((row) => !ddsUsed.has(row.uid))
+      .filter((row) => row.direction === bankRow.direction && row.amountCents === bankRow.amountCents)
+      .map((row) => ({ row, diffDays: daysBetween(bankRow.dateObj, row.dateObj) }))
+      .filter((row) => row.diffDays <= tolerance)
+      .sort((a, b) => (a.diffDays !== b.diffDays ? a.diffDays - b.diffDays : a.row.rowId - b.row.rowId))[0];
+
+    if (candidate) {
+      matches.push({
+        kind: "soft",
+        kindLabel: "Мягкое",
+        diffDays: candidate.diffDays,
+        bank: bankRow,
+        dds: candidate.row,
+      });
+      ddsUsed.add(candidate.row.uid);
+    } else {
+      missingBank.push(bankRow);
+    }
+  }
+
+  const missingDds = ddsAvailable.filter((row) => !ddsUsed.has(row.uid));
+  const exactCount = matches.filter((row) => row.kind === "exact").length;
+  const softCount = matches.filter((row) => row.kind === "soft").length;
+  const manualCount = matches.filter((row) => row.kind === "manual").length;
+  const ignoredDdsCount = ignoredDdsIds.size;
+
+  return {
+    generatedAt: new Date().toISOString(),
+    bankCount: bankRows.length,
+    ddsCount: ddsRows.length,
+    exactCount,
+    softCount,
+    manualCount,
+    ignoredBankCount,
+    ignoredDdsCount,
+    matches: matches.sort((a, b) => a.bank.dateObj.getTime() - b.bank.dateObj.getTime()),
+    missingBank: missingBank.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime()),
+    missingDds: missingDds.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime()),
+    missingBankByUid: missingBank.reduce((acc, row) => ({ ...acc, [row.uid]: row }), {}),
+    missingDdsByRowId: missingDds.reduce((acc, row) => ({ ...acc, [row.rowId]: row }), {}),
+  };
+}
+
+function collectBankRowsForRecon(filters) {
+  const from = parseFlexibleDate(filters.dateFrom || "");
+  const to = parseFlexibleDate(filters.dateTo || "");
+  const fromStart = from ? startOfDay(from) : null;
+  const toEnd = to ? endOfDay(to) : null;
+  const accounts = getBankDdsReconAccounts(filters.legalEntityId).filter(
+    (account) => Number(filters.accountId) === 0 || Number(account.id) === Number(filters.accountId)
+  );
+
+  const legalEntityById = new Map((state.banks.legalEntities || []).map((entity) => [entity.id, entity.name]));
+  const rows = [];
+  accounts.forEach((account) => {
+    (account.transactions || []).forEach((tx, idx) => {
+      const dateObj = tx?.dateObj instanceof Date ? tx.dateObj : parseFlexibleDate(tx?.dateObj || tx?.dateRaw || "");
+      const amountSigned = Number(tx?.amount);
+      if (!dateObj || !Number.isFinite(amountSigned)) return;
+      if (Math.abs(amountSigned) < 0.000001) return;
+      if (fromStart && dateObj < fromStart) return;
+      if (toEnd && dateObj > toEnd) return;
+
+      const direction = amountSigned < 0 ? "Выбытие" : "Поступление";
+      const amountAbs = Math.abs(amountSigned);
+      const amountCents = Math.round(amountAbs * 100);
+      const rowIdx = Number(tx?.idx) || idx;
+      const uid = buildBankReconUid(account.id, dateObj, amountSigned, rowIdx);
+      rows.push({
+        uid,
+        accountId: account.id,
+        accountName: String(account.name || ""),
+        legalEntityId: Number(account.legalEntityId) || 0,
+        legalEntityName: legalEntityById.get(account.legalEntityId) || "Без юрлица",
+        dateObj,
+        amountSigned,
+        amountAbs,
+        amountCents,
+        direction,
+        balance: Number.isFinite(Number(tx?.balance)) ? Number(tx.balance) : null,
+      });
+    });
+  });
+
+  return rows.sort((a, b) => {
+    const byDate = a.dateObj.getTime() - b.dateObj.getTime();
+    if (byDate !== 0) return byDate;
+    if (a.amountCents !== b.amountCents) return a.amountCents - b.amountCents;
+    return a.accountName.localeCompare(b.accountName, "ru");
+  });
+}
+
+function collectDdsRowsForRecon(filters) {
+  const from = parseFlexibleDate(filters.dateFrom || "");
+  const to = parseFlexibleDate(filters.dateTo || "");
+  const fromStart = from ? startOfDay(from) : null;
+  const toEnd = to ? endOfDay(to) : null;
+  const articleMap = buildArticleMap(state.articles);
+
+  return state.operationsRaw
+    .map((op) => enrichOperation(op, articleMap))
+    .filter((op) => (fromStart ? op.dateObj >= fromStart : true))
+    .filter((op) => (toEnd ? op.dateObj <= toEnd : true))
+    .filter((op) => Number.isFinite(Number(op.amount)) && Number(op.amount) > 0)
+    .map((op) => ({
+      uid: `dds:${op.rowId}`,
+      rowId: Number(op.rowId) || 0,
+      dateObj: op.dateObj,
+      direction: op.direction,
+      amountAbs: Math.abs(Number(op.amount) || 0),
+      amountCents: Math.round(Math.abs(Number(op.amount) || 0) * 100),
+      article: op.article,
+      activity: op.activity,
+      counterparty: op.counterparty || "",
+      comment: op.comment || "",
+    }))
+    .sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+}
+
+function buildBankReconUid(accountId, dateObj, amountSigned, idx) {
+  const dateKey = toDateInputValue(dateObj);
+  const cents = Math.round(Number(amountSigned || 0) * 100);
+  return `b:${Number(accountId) || 0}:${dateKey}:${cents}:${Number(idx) || 0}`;
+}
+
+function buildBankDdsExactKey(dateObj, direction, amountCents) {
+  return `${toDateInputValue(dateObj)}|${String(direction || "")}|${Number(amountCents) || 0}`;
+}
+
+function daysBetween(dateA, dateB) {
+  const a = startOfDay(dateA).getTime();
+  const b = startOfDay(dateB).getTime();
+  return Math.round(Math.abs(a - b) / 86400000);
+}
+
+function renderBankDdsReconMetrics(snapshot) {
+  els.bankDdsMetrics.innerHTML = `
+    <article class="metric"><div class="label">Банк операций</div><div class="value">${snapshot.bankCount}</div></article>
+    <article class="metric"><div class="label">ДДС операций</div><div class="value">${snapshot.ddsCount}</div></article>
+    <article class="metric"><div class="label">Точное</div><div class="value">${snapshot.exactCount}</div></article>
+    <article class="metric"><div class="label">Мягкое</div><div class="value">${snapshot.softCount}</div></article>
+    <article class="metric"><div class="label">Ручное</div><div class="value">${snapshot.manualCount}</div></article>
+    <article class="metric"><div class="label">Не попало в ДДС</div><div class="value">${snapshot.missingBank.length}</div></article>
+    <article class="metric"><div class="label">Лишнее в ДДС</div><div class="value">${snapshot.missingDds.length}</div></article>
+    <article class="metric"><div class="label">Игнор банка / ДДС</div><div class="value">${snapshot.ignoredBankCount} / ${snapshot.ignoredDdsCount}</div></article>
+  `;
+}
+
+function renderBankDdsReconMatches(matches) {
+  if (!matches || matches.length === 0) {
+    els.bankDdsMatchesBody.innerHTML = `<tr><td colspan="9" class="empty">Совпадений пока нет.</td></tr>`;
+    return;
+  }
+
+  els.bankDdsMatchesBody.innerHTML = matches
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(row.kindLabel)}</td>
+        <td>${escapeHtml(toDateInputValue(row.bank.dateObj))}</td>
+        <td>${escapeHtml(row.bank.legalEntityName)}</td>
+        <td>${escapeHtml(row.bank.accountName)}</td>
+        <td>${formatMoney(row.bank.direction === "Выбытие" ? -row.bank.amountAbs : row.bank.amountAbs)}</td>
+        <td>${escapeHtml(toDateInputValue(row.dds.dateObj))}</td>
+        <td>${formatMoney(row.dds.direction === "Выбытие" ? -row.dds.amountAbs : row.dds.amountAbs)}</td>
+        <td>${escapeHtml(row.dds.article || UNKNOWN_ARTICLE)}</td>
+        <td>${row.diffDays}</td>
+      </tr>
+    `
+    )
+    .join("");
+}
+
+function renderBankDdsReconMissingBank(rows) {
+  const canManage = hasPermission("reconcile.assign");
+  if (!rows || rows.length === 0) {
+    els.bankDdsMissingBankBody.innerHTML = `<tr><td colspan="7" class="empty">Все банковские операции сопоставлены.</td></tr>`;
+    return;
+  }
+
+  els.bankDdsMissingBankBody.innerHTML = rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(toDateInputValue(row.dateObj))}</td>
+        <td>${escapeHtml(row.legalEntityName)}</td>
+        <td>${escapeHtml(row.accountName)}</td>
+        <td>${escapeHtml(row.direction)}</td>
+        <td>${formatMoney(row.direction === "Выбытие" ? -row.amountAbs : row.amountAbs)}</td>
+        <td>${row.balance === null ? "н/д" : formatMoney(row.balance)}</td>
+        <td>
+          ${
+            canManage
+              ? `
+            <button type="button" class="secondary" data-bankdds-action="add-dds" data-bank-uid="${escapeHtml(row.uid)}">Добавить в ДДС</button>
+            <button type="button" class="secondary" data-bankdds-action="add-tech" data-bank-uid="${escapeHtml(row.uid)}">В техоперацию</button>
+            <button type="button" class="secondary" data-bankdds-action="ignore-bank" data-bank-uid="${escapeHtml(row.uid)}">Игнорировать</button>
+          `
+              : "—"
+          }
+        </td>
+      </tr>
+    `
+    )
+    .join("");
+}
+
+function renderBankDdsReconMissingDds(rows) {
+  const canManage = hasPermission("reconcile.assign");
+  if (!rows || rows.length === 0) {
+    els.bankDdsMissingDdsBody.innerHTML = `<tr><td colspan="7" class="empty">Лишних операций в ДДС не найдено.</td></tr>`;
+    return;
+  }
+
+  els.bankDdsMissingDdsBody.innerHTML = rows
+    .map(
+      (row) => `
+      <tr>
+        <td>${escapeHtml(toDateInputValue(row.dateObj))}</td>
+        <td>${escapeHtml(row.counterparty || "—")}</td>
+        <td>${escapeHtml(row.direction)}</td>
+        <td>${formatMoney(row.direction === "Выбытие" ? -row.amountAbs : row.amountAbs)}</td>
+        <td>${escapeHtml(row.article || UNKNOWN_ARTICLE)}</td>
+        <td>${escapeHtml(row.comment || "")}</td>
+        <td>
+          ${
+            canManage
+              ? `<button type="button" class="secondary" data-bankdds-action="ignore-dds" data-dds-row-id="${row.rowId}">Игнорировать</button>`
+              : "—"
+          }
+        </td>
+      </tr>
+    `
+    )
+    .join("");
+}
+
+function onBankDdsMissingBankAction(event) {
+  const button = event.target.closest("button[data-bankdds-action]");
+  if (!button) return;
+  const action = String(button.dataset.bankddsAction || "");
+  const uid = String(button.dataset.bankUid || "");
+  if (!uid) return;
+  const row = state.bankDdsRecon.latest?.missingBankByUid?.[uid];
+  if (!row) return;
+
+  if (action === "ignore-bank") {
+    if (!requirePermission("reconcile.assign", "Недостаточно прав: роль не позволяет менять сверку.")) return;
+    state.bankDdsRecon.bankDecisions[uid] = {
+      status: "ignored",
+      updatedAt: new Date().toISOString(),
+    };
+    saveBankDdsReconState(state.bankDdsRecon);
+    logChange("BANK_DDS_IGNORED_BANK", "Сверка банк↔ДДС", `${toDateInputValue(row.dateObj)}; ${row.accountName}; ${formatMoney(row.amountSigned)}`);
+    renderBankDdsReconTab(true);
+    return;
+  }
+
+  if (action === "add-dds") {
+    if (!requirePermission("reconcile.assign", "Недостаточно прав: роль не позволяет менять сверку.")) return;
+    addBankReconRowToDds(row, false);
+    return;
+  }
+
+  if (action === "add-tech") {
+    if (!requirePermission("reconcile.assign", "Недостаточно прав: роль не позволяет менять сверку.")) return;
+    addBankReconRowToDds(row, true);
+  }
+}
+
+function onBankDdsMissingDdsAction(event) {
+  const button = event.target.closest("button[data-bankdds-action]");
+  if (!button) return;
+  const action = String(button.dataset.bankddsAction || "");
+  const rowId = Number(button.dataset.ddsRowId);
+  if (action !== "ignore-dds" || !Number.isFinite(rowId)) return;
+  if (!requirePermission("reconcile.assign", "Недостаточно прав: роль не позволяет менять сверку.")) return;
+
+  state.bankDdsRecon.ddsDecisions[rowId] = {
+    status: "ignored",
+    updatedAt: new Date().toISOString(),
+  };
+  saveBankDdsReconState(state.bankDdsRecon);
+  logChange("BANK_DDS_IGNORED_DDS", "Сверка банк↔ДДС", `rowId=${rowId}`);
+  renderBankDdsReconTab(true);
+}
+
+function addBankReconRowToDds(bankRow, asTechnical) {
+  const nextRowId = getNextOperationRowId();
+  const articleInput = asTechnical
+    ? bankRow.direction === "Поступление"
+      ? "00 Внутреннее перемещение (доход)"
+      : "00 Внутреннее перемещение (расход)"
+    : "";
+
+  state.operationsRaw.push({
+    rowId: nextRowId,
+    dateRaw: toDateInputValue(bankRow.dateObj),
+    dateObj: new Date(bankRow.dateObj.getTime()),
+    counterparty: bankRow.accountName || "Банк",
+    comment: `Добавлено из сверки банк↔ДДС (${bankRow.legalEntityName})`,
+    articleInput,
+    amount: bankRow.amountAbs,
+    direction: bankRow.direction,
+  });
+
+  state.bankDdsRecon.bankDecisions[bankRow.uid] = {
+    status: "linked",
+    linkedRowId: nextRowId,
+    mode: asTechnical ? "tech" : "dds",
+    updatedAt: new Date().toISOString(),
+  };
+  saveBankDdsReconState(state.bankDdsRecon);
+
+  logChange(
+    asTechnical ? "BANK_DDS_ADD_TECH" : "BANK_DDS_ADD_DDS",
+    "Сверка банк↔ДДС",
+    `${toDateInputValue(bankRow.dateObj)}; ${bankRow.accountName}; ${formatMoney(bankRow.amountSigned)}`
+  );
+  renderReport();
+}
+
+function getNextOperationRowId() {
+  return (state.operationsRaw || []).reduce((max, row) => Math.max(max, Number(row?.rowId) || 0), 1) + 1;
+}
+
+function clearBankDdsReconDecisions() {
+  if (!requirePermission("reconcile.assign", "Недостаточно прав: роль не позволяет менять сверку.")) return;
+  const hasAnyDecisions =
+    Object.keys(state.bankDdsRecon.bankDecisions || {}).length > 0 ||
+    Object.keys(state.bankDdsRecon.ddsDecisions || {}).length > 0;
+  if (!hasAnyDecisions) return;
+  const confirmed = window.confirm("Сбросить все метки игнорирования и ручные связи в модуле сверки?");
+  if (!confirmed) return;
+  state.bankDdsRecon.bankDecisions = {};
+  state.bankDdsRecon.ddsDecisions = {};
+  saveBankDdsReconState(state.bankDdsRecon);
+  logChange("BANK_DDS_DECISIONS_CLEARED", "Сверка банк↔ДДС", "Сброшены игноры и ручные связи");
+  renderBankDdsReconTab(true);
+}
+
+function downloadBankDdsReconDiffCsv() {
+  if (!requirePermission("reconcile.export", "Недостаточно прав: роль не позволяет выгружать сверку.")) return;
+  const snapshot = buildBankDdsReconSnapshot();
+  if (snapshot.missingBank.length === 0 && snapshot.missingDds.length === 0) {
+    alert("Расхождений для выгрузки нет.");
+    return;
+  }
+
+  const lines = [];
+  lines.push(["Раздел", "Дата", "Юрлицо/Контрагент", "Счет", "Направление", "Сумма", "Статья ДДС", "Комментарий"]);
+
+  snapshot.missingBank.forEach((row) => {
+    lines.push([
+      "Не попало в ДДС",
+      toDateInputValue(row.dateObj),
+      row.legalEntityName,
+      row.accountName,
+      row.direction,
+      formatNumberForCsv(row.direction === "Выбытие" ? -row.amountAbs : row.amountAbs),
+      "",
+      "",
+    ]);
+  });
+
+  snapshot.missingDds.forEach((row) => {
+    lines.push([
+      "Лишнее в ДДС",
+      toDateInputValue(row.dateObj),
+      row.counterparty || "",
+      "",
+      row.direction,
+      formatNumberForCsv(row.direction === "Выбытие" ? -row.amountAbs : row.amountAbs),
+      row.article || "",
+      row.comment || "",
+    ]);
+  });
+
+  const csv = lines.map((line) => line.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(";")).join("\n");
+  triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `bank-dds-reconcile-${toDateInputValue(new Date())}.csv`);
 }
 
 function refreshReportActivityOptions() {
@@ -6487,6 +7095,7 @@ function exportAppBackupFile() {
       banks: state.banks,
       plan: state.plan,
       obligations: state.obligations,
+      bankDdsRecon: state.bankDdsRecon,
       analytics: { ...state.analytics, latest: null },
       access: state.access,
       changeLog: state.changeLog,
@@ -6555,6 +7164,7 @@ function applyBackupPayload(data) {
   state.banks = normalizeBanksState(data.banks, fallbackBanks);
   state.plan = normalizePlanState(data.plan, createDefaultPlanState());
   state.obligations = normalizeObligationsState(data.obligations, createDefaultObligationsState());
+  state.bankDdsRecon = normalizeBankDdsReconState(data.bankDdsRecon, createDefaultBankDdsReconState());
   state.analytics = normalizeAnalyticsState(data.analytics, createDefaultAnalyticsState());
   state.access = normalizeAccessStatePayload(data.access);
   state.changeLog = normalizeChangeLogPayload(data.changeLog);
@@ -6576,6 +7186,7 @@ function applyBackupPayload(data) {
   saveBanksState(state.banks);
   savePlanState(state.plan);
   saveObligationsState(state.obligations);
+  saveBankDdsReconState(state.bankDdsRecon);
   saveAnalyticsState(state.analytics);
   saveAccessState(state.access);
   saveChangeLog(state.changeLog);
@@ -6602,6 +7213,7 @@ function applyBackupPayload(data) {
   renderPlanTab();
   renderObligationsTab();
   renderAnalyticsTab();
+  renderBankDdsReconTab();
   renderReconcileTable();
   renderChangeLog();
   applyRoleAccess();
@@ -6857,6 +7469,21 @@ function createDefaultObligationsState() {
   };
 }
 
+function createDefaultBankDdsReconState() {
+  return {
+    filters: {
+      dateFrom: "",
+      dateTo: "",
+      legalEntityId: 0,
+      accountId: 0,
+      toleranceDays: 2,
+    },
+    bankDecisions: {},
+    ddsDecisions: {},
+    latest: null,
+  };
+}
+
 function loadObligationsState() {
   const fallback = createDefaultObligationsState();
   try {
@@ -6870,11 +7497,34 @@ function loadObligationsState() {
   }
 }
 
+function loadBankDdsReconState() {
+  const fallback = createDefaultBankDdsReconState();
+  try {
+    const raw = localStorage.getItem(STORAGE_BANK_DDS_RECON_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return normalizeBankDdsReconState(parsed, fallback);
+  } catch (error) {
+    console.warn("Cannot load bank-dds reconcile state from localStorage", error);
+    return fallback;
+  }
+}
+
 function saveObligationsState(obligationsState) {
   try {
     localStorage.setItem(STORAGE_OBLIGATIONS_KEY, JSON.stringify(obligationsState));
   } catch (error) {
     console.warn("Cannot save obligations state to localStorage", error);
+  }
+}
+
+function saveBankDdsReconState(reconState) {
+  try {
+    const payload = { ...(reconState || {}) };
+    delete payload.latest;
+    localStorage.setItem(STORAGE_BANK_DDS_RECON_KEY, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Cannot save bank-dds reconcile state to localStorage", error);
   }
 }
 
@@ -6919,6 +7569,55 @@ function normalizeObligationsState(rawState, fallback) {
   return {
     items: sortObligations(items),
     settings,
+  };
+}
+
+function normalizeBankDdsReconState(rawState, fallback) {
+  if (!rawState || typeof rawState !== "object") return fallback;
+  const rawFilters = rawState.filters && typeof rawState.filters === "object" ? rawState.filters : {};
+  const filters = {
+    dateFrom: parseFlexibleDate(rawFilters.dateFrom || "") ? toDateInputValue(parseFlexibleDate(rawFilters.dateFrom || "")) : "",
+    dateTo: parseFlexibleDate(rawFilters.dateTo || "") ? toDateInputValue(parseFlexibleDate(rawFilters.dateTo || "")) : "",
+    legalEntityId: Number(rawFilters.legalEntityId) || 0,
+    accountId: Number(rawFilters.accountId) || 0,
+    toleranceDays: normalizeIntInRange(rawFilters.toleranceDays, fallback.filters.toleranceDays, 0, 5),
+  };
+
+  const bankDecisions =
+    rawState.bankDecisions && typeof rawState.bankDecisions === "object"
+      ? Object.entries(rawState.bankDecisions).reduce((acc, [uid, value]) => {
+          const status = String(value?.status || "").trim();
+          if (!uid || !["ignored", "linked"].includes(status)) return acc;
+          acc[uid] = {
+            status,
+            linkedRowId: Number(value?.linkedRowId) || 0,
+            mode: String(value?.mode || ""),
+            updatedAt: String(value?.updatedAt || ""),
+          };
+          return acc;
+        }, {})
+      : {};
+
+  const ddsDecisions =
+    rawState.ddsDecisions && typeof rawState.ddsDecisions === "object"
+      ? Object.entries(rawState.ddsDecisions).reduce((acc, [rowIdRaw, value]) => {
+          const rowId = Number(rowIdRaw);
+          if (!Number.isFinite(rowId)) return acc;
+          const status = String(value?.status || "").trim();
+          if (!["ignored"].includes(status)) return acc;
+          acc[rowId] = {
+            status,
+            updatedAt: String(value?.updatedAt || ""),
+          };
+          return acc;
+        }, {})
+      : {};
+
+  return {
+    filters,
+    bankDecisions,
+    ddsDecisions,
+    latest: null,
   };
 }
 

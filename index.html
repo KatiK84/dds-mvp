@@ -58,6 +58,7 @@
         <button class="tab-btn" data-tab="obligations">Календарь платежей</button>
         <button class="tab-btn" data-tab="analytics">Аналитика и выводы</button>
         <button class="tab-btn" data-tab="reconcile">Разнесение платежей</button>
+        <button class="tab-btn" data-tab="bankddsrecon">Сверка банк ↔ ДДС</button>
         <button class="tab-btn" data-tab="banks">Банки</button>
         <button class="tab-btn" data-tab="articles">Статьи ДДС</button>
         <button class="tab-btn" data-tab="changelog">Журнал изменений</button>
@@ -863,6 +864,116 @@
                 </tr>
               </thead>
               <tbody id="reconcileTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="bankDdsReconTab">
+        <section class="card">
+          <h2>Сверка банк ↔ ДДС</h2>
+          <p class="hint">
+            Модуль работает в 2 шага: сначала автосопоставление (точное и мягкое), затем ручной разбор расхождений.
+          </p>
+
+          <div class="controls-grid bank-dds-recon-controls">
+            <label>
+              Период с
+              <input id="bankDdsDateFrom" type="date" />
+            </label>
+            <label>
+              Период по
+              <input id="bankDdsDateTo" type="date" />
+            </label>
+            <label>
+              Юрлицо
+              <select id="bankDdsEntityFilter">
+                <option value="0">Все</option>
+              </select>
+            </label>
+            <label>
+              Банк/счет
+              <select id="bankDdsAccountFilter">
+                <option value="0">Все</option>
+              </select>
+            </label>
+            <label>
+              Мягкое сопоставление: допуск, дней
+              <select id="bankDdsToleranceDays">
+                <option value="0">0</option>
+                <option value="1">1</option>
+                <option value="2" selected>2</option>
+                <option value="3">3</option>
+                <option value="5">5</option>
+              </select>
+            </label>
+            <button id="bankDdsRunBtn" type="button">Запустить сверку</button>
+            <button id="bankDdsExportBtn" type="button" class="secondary">Скачать расхождения CSV</button>
+            <button id="bankDdsClearDecisionsBtn" type="button" class="secondary">Сбросить игноры/связи</button>
+          </div>
+          <p id="bankDdsStatus" class="status">Выберите период и нажмите «Запустить сверку».</p>
+        </section>
+
+        <section class="metrics" id="bankDdsMetrics"></section>
+
+        <section class="table-card">
+          <h2>Шаг 1. Автосопоставление</h2>
+          <div class="table-wrap small">
+            <table>
+              <thead>
+                <tr>
+                  <th>Тип</th>
+                  <th>Банк: дата</th>
+                  <th>Банк: юрлицо</th>
+                  <th>Банк: счет</th>
+                  <th>Банк: сумма</th>
+                  <th>ДДС: дата</th>
+                  <th>ДДС: сумма</th>
+                  <th>ДДС: статья</th>
+                  <th>Дней разницы</th>
+                </tr>
+              </thead>
+              <tbody id="bankDdsMatchesBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="table-card">
+          <h2>Шаг 2. Не попало в ДДС (есть в банке)</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Юрлицо</th>
+                  <th>Счет</th>
+                  <th>Направление</th>
+                  <th>Сумма</th>
+                  <th>Остаток</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody id="bankDdsMissingBankBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="table-card">
+          <h2>Шаг 2. Лишнее в ДДС (нет в банке)</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Контрагент</th>
+                  <th>Направление</th>
+                  <th>Сумма</th>
+                  <th>Статья</th>
+                  <th>Комментарий</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody id="bankDdsMissingDdsBody"></tbody>
             </table>
           </div>
         </section>
