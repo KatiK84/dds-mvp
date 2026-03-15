@@ -428,6 +428,27 @@
               </select>
             </label>
           </div>
+          <div class="controls-grid obligation-calendar-filters">
+            <label>
+              Категория
+              <select id="obligationCalendarCategoryFilter">
+                <option value="all">Все</option>
+              </select>
+            </label>
+            <label>
+              Юрлицо
+              <select id="obligationCalendarEntityFilter">
+                <option value="0">Все</option>
+              </select>
+            </label>
+            <label>
+              Банк/счет
+              <select id="obligationCalendarBankFilter">
+                <option value="0">Все</option>
+              </select>
+            </label>
+            <button id="downloadObligationCalendarCsvBtn" type="button" class="secondary">Скачать календарь CSV</button>
+          </div>
           <section class="metrics" id="obligationMetrics"></section>
           <div class="table-wrap small">
             <table>
@@ -450,6 +471,27 @@
 
         <section class="table-card">
           <h2>3. Реестр обязательств</h2>
+          <div class="controls-grid obligation-registry-filters">
+            <label>
+              Категория
+              <select id="obligationRegistryCategoryFilter">
+                <option value="all">Все</option>
+              </select>
+            </label>
+            <label>
+              Юрлицо
+              <select id="obligationRegistryEntityFilter">
+                <option value="0">Все</option>
+              </select>
+            </label>
+            <label>
+              Банк/счет
+              <select id="obligationRegistryBankFilter">
+                <option value="0">Все</option>
+              </select>
+            </label>
+            <button id="downloadObligationRegistryCsvBtn" type="button" class="secondary">Скачать реестр CSV</button>
+          </div>
           <div class="table-wrap small">
             <table>
               <thead>

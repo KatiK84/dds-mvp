@@ -235,7 +235,9 @@ button.secondary {
 }
 
 .obligation-horizon-grid,
-.obligation-suggest-grid {
+.obligation-suggest-grid,
+.obligation-calendar-filters,
+.obligation-registry-filters {
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 

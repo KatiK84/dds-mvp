@@ -184,6 +184,16 @@ const state = {
   obligationsUi: {
     editingId: 0,
     suggestions: [],
+    calendarFilters: {
+      category: "all",
+      legalEntityId: 0,
+      bankAccountId: 0,
+    },
+    registryFilters: {
+      category: "all",
+      legalEntityId: 0,
+      bankAccountId: 0,
+    },
   },
   operationsRaw: runtimeState.operationsRaw,
   manualAssignments: runtimeState.manualAssignments,
@@ -307,8 +317,16 @@ const els = {
   obligationCancelBtn: document.getElementById("obligationCancelBtn"),
   obligationFormStatus: document.getElementById("obligationFormStatus"),
   obligationHorizonDays: document.getElementById("obligationHorizonDays"),
+  obligationCalendarCategoryFilter: document.getElementById("obligationCalendarCategoryFilter"),
+  obligationCalendarEntityFilter: document.getElementById("obligationCalendarEntityFilter"),
+  obligationCalendarBankFilter: document.getElementById("obligationCalendarBankFilter"),
+  downloadObligationCalendarCsvBtn: document.getElementById("downloadObligationCalendarCsvBtn"),
   obligationMetrics: document.getElementById("obligationMetrics"),
   obligationCalendarBody: document.getElementById("obligationCalendarBody"),
+  obligationRegistryCategoryFilter: document.getElementById("obligationRegistryCategoryFilter"),
+  obligationRegistryEntityFilter: document.getElementById("obligationRegistryEntityFilter"),
+  obligationRegistryBankFilter: document.getElementById("obligationRegistryBankFilter"),
+  downloadObligationRegistryCsvBtn: document.getElementById("downloadObligationRegistryCsvBtn"),
   obligationTableBody: document.getElementById("obligationTableBody"),
   obligationLookbackMonths: document.getElementById("obligationLookbackMonths"),
   obligationMinRepeats: document.getElementById("obligationMinRepeats"),
@@ -607,6 +625,8 @@ function applyRoleAccess() {
   setElementDisabled(els.obligationMinRepeats, !canManagePlan);
   setElementDisabled(els.obligationMinAmount, !canManagePlan);
   setElementDisabled(els.obligationSuggestBtn, !canManagePlan);
+  setElementDisabled(els.downloadObligationCalendarCsvBtn, !canExportPlan);
+  setElementDisabled(els.downloadObligationRegistryCsvBtn, !canExportPlan);
   setFormDisabled(els.analyticsSettingsForm, !canManageAnalytics);
   setElementDisabled(els.analyticsApplyBtn, !canManageAnalytics);
   setElementDisabled(els.analyticsSyncWithReportBtn, !canManageAnalytics);
@@ -748,6 +768,34 @@ function bindObligationsEvents() {
   els.obligationLegalEntity?.addEventListener("change", () => {
     refreshObligationAccountSelect(Number(els.obligationLegalEntity?.value) || 0, 0);
   });
+  els.obligationCalendarCategoryFilter?.addEventListener("change", () => {
+    state.obligationsUi.calendarFilters.category = String(els.obligationCalendarCategoryFilter.value || "all");
+    renderObligationsTab();
+  });
+  els.obligationCalendarEntityFilter?.addEventListener("change", () => {
+    state.obligationsUi.calendarFilters.legalEntityId = Number(els.obligationCalendarEntityFilter.value) || 0;
+    state.obligationsUi.calendarFilters.bankAccountId = 0;
+    renderObligationsTab();
+  });
+  els.obligationCalendarBankFilter?.addEventListener("change", () => {
+    state.obligationsUi.calendarFilters.bankAccountId = Number(els.obligationCalendarBankFilter.value) || 0;
+    renderObligationsTab();
+  });
+  els.obligationRegistryCategoryFilter?.addEventListener("change", () => {
+    state.obligationsUi.registryFilters.category = String(els.obligationRegistryCategoryFilter.value || "all");
+    renderObligationsTab();
+  });
+  els.obligationRegistryEntityFilter?.addEventListener("change", () => {
+    state.obligationsUi.registryFilters.legalEntityId = Number(els.obligationRegistryEntityFilter.value) || 0;
+    state.obligationsUi.registryFilters.bankAccountId = 0;
+    renderObligationsTab();
+  });
+  els.obligationRegistryBankFilter?.addEventListener("change", () => {
+    state.obligationsUi.registryFilters.bankAccountId = Number(els.obligationRegistryBankFilter.value) || 0;
+    renderObligationsTab();
+  });
+  els.downloadObligationCalendarCsvBtn?.addEventListener("click", downloadObligationCalendarCsv);
+  els.downloadObligationRegistryCsvBtn?.addEventListener("click", downloadObligationRegistryCsv);
   els.obligationHorizonDays?.addEventListener("change", () => {
     if (!requirePermission("plan.manage", "Недостаточно прав: только Админ или Оператор могут менять настройки календаря.")) return;
     state.obligations.settings.horizonDays = normalizeIntInRange(els.obligationHorizonDays.value, 30, 7, 90);
@@ -1078,18 +1126,22 @@ function renderPlanTab() {
 function renderObligationsTab() {
   if (!els.obligationTableBody || !els.obligationCalendarBody) return;
 
+  ensureObligationFilterState();
   const canManage = hasPermission("plan.manage");
   const preferredEntityId = Number(els.obligationLegalEntity?.value) || 0;
   const selectedEntityId = refreshObligationEntitySelect(preferredEntityId);
   refreshObligationAccountSelect(selectedEntityId, Number(els.obligationBankAccount?.value) || 0);
   fillObligationSettingsInputs();
+  renderObligationFilterControls();
   renderObligationFormState();
-  renderObligationTable(canManage);
+  const filteredRegistryRows = getFilteredObligationRegistryRows(state.obligations.items || []);
+  renderObligationTable(canManage, filteredRegistryRows);
   renderObligationSuggestions(canManage);
 
   const horizonDays = normalizeIntInRange(state.obligations.settings.horizonDays, 30, 7, 90);
   const scheduleRows = buildObligationScheduleRows(state.obligations.items, horizonDays, new Date());
-  renderObligationCalendar(scheduleRows, horizonDays);
+  const filteredCalendarRows = getFilteredObligationCalendarRows(scheduleRows);
+  renderObligationCalendar(filteredCalendarRows, horizonDays, filteredRegistryRows);
 }
 
 function fillObligationSettingsInputs() {
@@ -1108,6 +1160,103 @@ function fillObligationSettingsInputs() {
   if (!els.obligationStartMonth?.value) {
     els.obligationStartMonth.value = getCurrentMonthKey();
   }
+}
+
+function ensureObligationFilterState() {
+  const fallback = { category: "all", legalEntityId: 0, bankAccountId: 0 };
+  const normalize = (raw) => ({
+    category: OBLIGATION_CATEGORY_LABELS[String(raw?.category || "").trim().toLowerCase()] ? String(raw.category).trim().toLowerCase() : "all",
+    legalEntityId: Number(raw?.legalEntityId) || 0,
+    bankAccountId: Number(raw?.bankAccountId) || 0,
+  });
+
+  state.obligationsUi.calendarFilters = normalize(state.obligationsUi.calendarFilters || fallback);
+  state.obligationsUi.registryFilters = normalize(state.obligationsUi.registryFilters || fallback);
+}
+
+function renderObligationFilterControls() {
+  renderSingleObligationFilterControls(
+    {
+      category: els.obligationCalendarCategoryFilter,
+      legalEntity: els.obligationCalendarEntityFilter,
+      bankAccount: els.obligationCalendarBankFilter,
+    },
+    state.obligationsUi.calendarFilters
+  );
+
+  renderSingleObligationFilterControls(
+    {
+      category: els.obligationRegistryCategoryFilter,
+      legalEntity: els.obligationRegistryEntityFilter,
+      bankAccount: els.obligationRegistryBankFilter,
+    },
+    state.obligationsUi.registryFilters
+  );
+}
+
+function renderSingleObligationFilterControls(controls, filters) {
+  if (controls.category) {
+    const categoryOptions = ['<option value="all">Все</option>'].concat(
+      Object.entries(OBLIGATION_CATEGORY_LABELS).map(([key, label]) => `<option value="${key}">${escapeHtml(label)}</option>`)
+    );
+    controls.category.innerHTML = categoryOptions.join("");
+    const categoryExists = [...controls.category.options].some((option) => option.value === String(filters.category || ""));
+    const nextCategory = categoryExists ? String(filters.category || "all") : "all";
+    filters.category = nextCategory;
+    controls.category.value = nextCategory;
+  }
+
+  if (controls.legalEntity) {
+    const entityOptions = ['<option value="0">Все</option>'].concat(
+      (state.banks.legalEntities || []).map((entity) => `<option value="${entity.id}">${escapeHtml(entity.name)}</option>`)
+    );
+    controls.legalEntity.innerHTML = entityOptions.join("");
+    const entityExists = [...controls.legalEntity.options].some((option) => Number(option.value) === Number(filters.legalEntityId));
+    const nextEntityId = entityExists ? Number(filters.legalEntityId) : 0;
+    filters.legalEntityId = nextEntityId;
+    controls.legalEntity.value = String(nextEntityId);
+  }
+
+  if (controls.bankAccount) {
+    const accountOptions = ['<option value="0">Все</option>'].concat(
+      getObligationFilterAccounts(filters.legalEntityId).map((account) => `<option value="${account.id}">${escapeHtml(account.name)}</option>`)
+    );
+    controls.bankAccount.innerHTML = accountOptions.join("");
+    const accountExists = [...controls.bankAccount.options].some((option) => Number(option.value) === Number(filters.bankAccountId));
+    const nextAccountId = accountExists ? Number(filters.bankAccountId) : 0;
+    filters.bankAccountId = nextAccountId;
+    controls.bankAccount.value = String(nextAccountId);
+  }
+}
+
+function getObligationFilterAccounts(legalEntityId = 0) {
+  return (state.banks.accounts || [])
+    .filter((account) => {
+      if (account.status === "DELETED") return false;
+      if (Number(legalEntityId) > 0 && Number(account.legalEntityId) !== Number(legalEntityId)) return false;
+      return true;
+    })
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ru"));
+}
+
+function getFilteredObligationCalendarRows(rows) {
+  const filters = state.obligationsUi.calendarFilters || {};
+  return (rows || []).filter((row) => {
+    const byCategory = !filters.category || filters.category === "all" || row.category === filters.category;
+    const byEntity = !filters.legalEntityId || Number(filters.legalEntityId) === 0 || Number(row.legalEntityId) === Number(filters.legalEntityId);
+    const byAccount = !filters.bankAccountId || Number(filters.bankAccountId) === 0 || Number(row.bankAccountId) === Number(filters.bankAccountId);
+    return byCategory && byEntity && byAccount;
+  });
+}
+
+function getFilteredObligationRegistryRows(rows) {
+  const filters = state.obligationsUi.registryFilters || {};
+  return (rows || []).filter((row) => {
+    const byCategory = !filters.category || filters.category === "all" || row.category === filters.category;
+    const byEntity = !filters.legalEntityId || Number(filters.legalEntityId) === 0 || Number(row.legalEntityId) === Number(filters.legalEntityId);
+    const byAccount = !filters.bankAccountId || Number(filters.bankAccountId) === 0 || Number(row.bankAccountId) === Number(filters.bankAccountId);
+    return byCategory && byEntity && byAccount;
+  });
 }
 
 function onObligationFormSubmit(event) {
@@ -1252,8 +1401,8 @@ function renderObligationFormState() {
   els.obligationSaveBtn.textContent = "Сохранить изменения";
 }
 
-function renderObligationTable(canManage) {
-  const rows = sortObligations(state.obligations.items || []);
+function renderObligationTable(canManage, rowsInput) {
+  const rows = sortObligations(rowsInput || []);
   if (!rows.length) {
     els.obligationTableBody.innerHTML = `<tr><td colspan="12" class="empty">Обязательные платежи еще не добавлены.</td></tr>`;
     return;
@@ -1324,6 +1473,8 @@ function buildObligationScheduleRows(items, horizonDays, startDate = new Date())
             month: monthKey,
             name: item.name,
             category: item.category,
+            legalEntityId: Number(item.legalEntityId) || 0,
+            bankAccountId: Number(item.bankAccountId) || 0,
             legalEntityName: getLegalEntityNameById(item.legalEntityId),
             bankAccountName: getBankAccountNameById(item.bankAccountId),
             counterparty: item.counterparty,
@@ -1351,10 +1502,10 @@ function buildDueDateForMonth(monthKey, dayOfMonth) {
   return new Date(baseDate.getFullYear(), baseDate.getMonth(), safeDay);
 }
 
-function renderObligationCalendar(rows, horizonDays) {
+function renderObligationCalendar(rows, horizonDays, filteredRegistryRows = []) {
   if (!rows.length) {
     els.obligationCalendarBody.innerHTML = `<tr><td colspan="8" class="empty">На горизонте ${horizonDays} дней обязательных платежей нет.</td></tr>`;
-    renderObligationMetrics(rows, horizonDays);
+    renderObligationMetrics(rows, horizonDays, filteredRegistryRows);
     return;
   }
 
@@ -1375,12 +1526,13 @@ function renderObligationCalendar(rows, horizonDays) {
     )
     .join("");
 
-  renderObligationMetrics(rows, horizonDays);
+  renderObligationMetrics(rows, horizonDays, filteredRegistryRows);
 }
 
-function renderObligationMetrics(rows, horizonDays) {
+function renderObligationMetrics(rows, horizonDays, filteredRegistryRows = []) {
   if (!els.obligationMetrics) return;
-  const activeCount = (state.obligations.items || []).filter((row) => row.active).length;
+  const sourceRows = Array.isArray(filteredRegistryRows) ? filteredRegistryRows : state.obligations.items || [];
+  const activeCount = sourceRows.filter((row) => row.active).length;
   const horizonTotal = rows.reduce((sum, row) => sum + row.amount, 0);
   const monthKey = getCurrentMonthKey();
   const thisMonthTotal = rows.filter((row) => row.month === monthKey).reduce((sum, row) => sum + row.amount, 0);
@@ -1568,6 +1720,78 @@ function acceptObligationSuggestion(suggestId) {
   saveObligationsState(state.obligations);
   logChange("OBLIGATION_ACCEPTED", "Календарь платежей", `${suggestion.name}; ${formatMoney(suggestion.amount)}`);
   renderObligationsTab();
+}
+
+function getCurrentObligationCalendarRows() {
+  const horizonDays = normalizeIntInRange(state.obligations.settings.horizonDays, 30, 7, 90);
+  const scheduleRows = buildObligationScheduleRows(state.obligations.items, horizonDays, new Date());
+  return getFilteredObligationCalendarRows(scheduleRows);
+}
+
+function getCurrentObligationRegistryRows() {
+  return sortObligations(getFilteredObligationRegistryRows(state.obligations.items || []));
+}
+
+function downloadObligationCalendarCsv() {
+  if (!requirePermission("plan.export", "Недостаточно прав: роль не позволяет выгружать календарь обязательств.")) return;
+  const rows = getCurrentObligationCalendarRows();
+  if (!rows.length) {
+    alert("Нет строк для выгрузки в календаре обязательств.");
+    return;
+  }
+
+  const lines = [
+    ["Дата платежа", "Месяц", "Название", "Категория", "Юрлицо", "Счет", "Контрагент", "Сумма"],
+    ...rows.map((row) => [
+      toDateInputValue(row.dateObj),
+      row.month,
+      row.name,
+      obligationCategoryLabel(row.category),
+      row.legalEntityName || "",
+      row.bankAccountName || "",
+      row.counterparty || "",
+      formatNumberForCsv(row.amount),
+    ]),
+  ];
+
+  const csv = lines.map((line) => line.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(";")).join("\n");
+  triggerDownload(
+    new Blob([csv], { type: "text/csv;charset=utf-8;" }),
+    `obligations-calendar-${toDateInputValue(new Date())}.csv`
+  );
+}
+
+function downloadObligationRegistryCsv() {
+  if (!requirePermission("plan.export", "Недостаточно прав: роль не позволяет выгружать реестр обязательств.")) return;
+  const rows = getCurrentObligationRegistryRows();
+  if (!rows.length) {
+    alert("Нет строк для выгрузки в реестре обязательств.");
+    return;
+  }
+
+  const lines = [
+    ["Название", "Категория", "Юрлицо", "Счет", "Контрагент", "Сумма", "День", "Начало", "Конец", "Статус", "Источник", "Комментарий"],
+    ...rows.map((row) => [
+      row.name,
+      obligationCategoryLabel(row.category),
+      getLegalEntityNameById(row.legalEntityId),
+      getBankAccountNameById(row.bankAccountId),
+      row.counterparty || "",
+      formatNumberForCsv(row.amount),
+      String(row.dayOfMonth || ""),
+      row.startMonth || "",
+      row.endMonth || "",
+      row.active ? "Активен" : "Пауза",
+      row.source === "suggested" ? "Подсказка" : "Ручной",
+      row.comment || "",
+    ]),
+  ];
+
+  const csv = lines.map((line) => line.map((cell) => `"${String(cell || "").replaceAll('"', '""')}"`).join(";")).join("\n");
+  triggerDownload(
+    new Blob([csv], { type: "text/csv;charset=utf-8;" }),
+    `obligations-registry-${toDateInputValue(new Date())}.csv`
+  );
 }
 
 function detectModeDay(dates) {
